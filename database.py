@@ -108,6 +108,19 @@ class DatabaseManager:
             if 'institution_name' not in columns:
                 cursor.execute('ALTER TABLE user_tokens ADD COLUMN institution_name TEXT')
             
+            # Add category columns to transactions table if they don't exist
+            cursor.execute("PRAGMA table_info(transactions)")
+            transaction_columns = [column[1] for column in cursor.fetchall()]
+            
+            if 'category_primary' not in transaction_columns:
+                cursor.execute('ALTER TABLE transactions ADD COLUMN category_primary TEXT')
+            
+            if 'category_detailed' not in transaction_columns:
+                cursor.execute('ALTER TABLE transactions ADD COLUMN category_detailed TEXT')
+            
+            if 'category_confidence' not in transaction_columns:
+                cursor.execute('ALTER TABLE transactions ADD COLUMN category_confidence TEXT')
+            
             # Create indexes for faster lookups
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_tokens_user_id ON user_tokens(user_id)')
@@ -118,6 +131,8 @@ class DatabaseManager:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_transactions_account_id ON transactions(account_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_transactions_transaction_id ON transactions(transaction_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_transactions_category_primary ON transactions(category_primary)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_transactions_category_detailed ON transactions(category_detailed)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category)')
             
             conn.commit()
@@ -505,8 +520,9 @@ class DatabaseManager:
                             unofficial_currency_code, date, datetime, authorized_date,
                             authorized_datetime, name, merchant_name, account_owner,
                             category, subcategory, transaction_type, pending,
-                            institution_name, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                            institution_name, category_primary, category_detailed,
+                            category_confidence, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ''', (
                         user_id, account_id, transaction_id, amount,
                         transaction.get('iso_currency_code', 'USD'),
@@ -519,7 +535,10 @@ class DatabaseManager:
                         category, subcategory,
                         transaction.get('transaction_type'),
                         transaction.get('pending', False),
-                        transaction.get('institution_name')
+                        transaction.get('institution_name'),
+                        transaction.get('category_primary', 'OTHER'),
+                        transaction.get('category_detailed', 'OTHER'),
+                        transaction.get('category_confidence', 'UNKNOWN')
                     ))
                 
                 conn.commit()
@@ -530,7 +549,7 @@ class DatabaseManager:
             return False
     
     def get_cached_transactions(self, user_id: int, account_types: Optional[list[str]] = None, 
-                              account_id: Optional[str] = None, limit: int = 100, offset: int = 0) -> list[Dict[str, Any]]:
+                              account_id: Optional[str] = None, year: Optional[int] = None, month: Optional[int] = None, limit: int = 100, offset: int = 0) -> list[Dict[str, Any]]:
         """Get cached transaction information from database"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -544,6 +563,17 @@ class DatabaseManager:
                 WHERE t.user_id = ? AND a.is_active = 1
             '''
             params: list[Any] = [user_id]
+            
+            # Add year/month filtering
+            if year is not None:
+                if month is not None:
+                    # Specific month
+                    query += ' AND strftime("%Y", t.date) = ? AND strftime("%m", t.date) = ?'
+                    params.extend([str(year), f"{month:02d}"])
+                else:
+                    # Entire year
+                    query += ' AND strftime("%Y", t.date) = ?'
+                    params.append(str(year))
             
             if account_id:
                 query += ' AND t.account_id = ?'
@@ -573,6 +603,9 @@ class DatabaseManager:
                     'merchant_name': transaction_dict['merchant_name'],
                     'category': transaction_dict['category'],
                     'subcategory': transaction_dict['subcategory'],
+                    'category_primary': transaction_dict.get('category_primary', 'OTHER'),
+                    'category_detailed': transaction_dict.get('category_detailed', 'OTHER'),
+                    'category_confidence': transaction_dict.get('category_confidence', 'UNKNOWN'),
                     'date': transaction_dict['date'],
                     'pending': transaction_dict['pending'],
                     'institution_name': transaction_dict['institution_name'],
@@ -585,7 +618,7 @@ class DatabaseManager:
             return transactions
     
     def get_transaction_summary(self, user_id: int, account_types: Optional[list[str]] = None, 
-                              account_id: Optional[str] = None, days: int = 30) -> Dict[str, Any]:
+                              account_id: Optional[str] = None, year: Optional[int] = None, month: Optional[int] = None) -> Dict[str, Any]:
         """Get transaction summary statistics"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
@@ -600,10 +633,20 @@ class DatabaseManager:
                 FROM transactions t
                 JOIN accounts a ON t.account_id = a.account_id AND t.user_id = a.user_id
                 WHERE t.user_id = ? AND a.is_active = 1
-                AND t.date >= date('now', '-{} days')
-            '''.format(days)
+            '''
             
             params: list[Any] = [user_id]
+            
+            # Add year/month filtering
+            if year is not None:
+                if month is not None:
+                    # Specific month
+                    query += ' AND strftime("%Y", t.date) = ? AND strftime("%m", t.date) = ?'
+                    params.extend([str(year), f"{month:02d}"])
+                else:
+                    # Entire year
+                    query += ' AND strftime("%Y", t.date) = ?'
+                    params.append(str(year))
             
             if account_id:
                 query += ' AND t.account_id = ?'
@@ -616,7 +659,7 @@ class DatabaseManager:
             cursor.execute(query, params)
             row = cursor.fetchone()
             
-            # Get spending by category
+            # Get spending by category (old category field for backward compatibility)
             category_query = '''
                 SELECT 
                     t.category,
@@ -625,9 +668,17 @@ class DatabaseManager:
                 FROM transactions t
                 JOIN accounts a ON t.account_id = a.account_id AND t.user_id = a.user_id
                 WHERE t.user_id = ? AND a.is_active = 1
-                AND t.date >= date('now', '-{} days')
                 AND t.category IS NOT NULL
-            '''.format(days)
+            '''
+            
+            # Add year/month filtering to category query
+            if year is not None:
+                if month is not None:
+                    # Specific month
+                    category_query += ' AND strftime("%Y", t.date) = ? AND strftime("%m", t.date) = ?'
+                else:
+                    # Entire year
+                    category_query += ' AND strftime("%Y", t.date) = ?'
             
             if account_id:
                 category_query += ' AND t.account_id = ?'
@@ -646,6 +697,57 @@ class DatabaseManager:
                     'total_amount': cat_row['total_amount']
                 })
             
+            # Get spending by primary category (new Plaid categorization)
+            primary_category_query = '''
+                SELECT 
+                    t.category_primary,
+                    COUNT(*) as transaction_count,
+                    SUM(ABS(t.amount)) as total_amount
+                FROM transactions t
+                JOIN accounts a ON t.account_id = a.account_id AND t.user_id = a.user_id
+                WHERE t.user_id = ? AND a.is_active = 1
+                AND t.category_primary IS NOT NULL
+                AND t.category_primary != 'OTHER'
+            '''
+            
+            # Add year/month filtering to primary category query
+            if year is not None:
+                if month is not None:
+                    # Specific month
+                    primary_category_query += ' AND strftime("%Y", t.date) = ? AND strftime("%m", t.date) = ?'
+                else:
+                    # Entire year
+                    primary_category_query += ' AND strftime("%Y", t.date) = ?'
+            
+            if account_id:
+                primary_category_query += ' AND t.account_id = ?'
+            elif account_types:
+                placeholders = ','.join(['?' for _ in account_types])
+                primary_category_query += f' AND a.type IN ({placeholders})'
+            
+            primary_category_query += ' GROUP BY t.category_primary ORDER BY total_amount DESC LIMIT 10'
+            
+            cursor.execute(primary_category_query, params)
+            primary_categories = []
+            for cat_row in cursor.fetchall():
+                primary_categories.append({
+                    'category': cat_row['category_primary'],
+                    'transaction_count': cat_row['transaction_count'],
+                    'total_amount': cat_row['total_amount']
+                })
+            
+            # Calculate period days
+            if year is not None and month is not None:
+                # Specific month - calculate days in that month
+                import calendar
+                days = calendar.monthrange(year, month)[1]
+            elif year is not None:
+                # Entire year - 365 or 366 days
+                days = 366 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 365
+            else:
+                # Default to 30 days
+                days = 30
+            
             return {
                 'total_transactions': row['total_transactions'] or 0,
                 'total_debits': row['total_debits'] or 0,
@@ -653,6 +755,7 @@ class DatabaseManager:
                 'avg_transaction_amount': row['avg_transaction_amount'] or 0,
                 'net_flow': (row['total_debits'] or 0) - (row['total_credits'] or 0),
                 'top_categories': categories,
+                'top_primary_categories': primary_categories,
                 'period_days': days
             }
     

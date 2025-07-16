@@ -194,6 +194,71 @@ class PlaidService:
             else:
                 return 'asset'  # Default to asset
     
+    def _fetch_transactions_for_token(self, access_token: str, accounts: List[Dict], 
+                                     start_date: datetime.date, end_date: datetime.date) -> List[Dict]:
+        """
+        Fetch transactions for a specific access token and accounts
+        
+        Args:
+            access_token: Plaid access token
+            accounts: List of accounts to fetch transactions for
+            start_date: Start date for transaction fetch
+            end_date: End date for transaction fetch
+            
+        Returns:
+            List of transactions filtered to relevant accounts
+        """
+        transactions_request = TransactionsGetRequest(
+            access_token=access_token,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        transactions_response = self.client.transactions_get(transactions_request)
+        transactions = transactions_response.to_dict()['transactions']
+        
+        # Filter transactions to only include those from relevant accounts
+        relevant_account_ids = {acc['account_id'] for acc in accounts}
+        filtered_transactions = [
+            t for t in transactions 
+            if t.get('account_id') in relevant_account_ids
+        ]
+        
+        return filtered_transactions
+    
+    def _format_transactions(self, transactions: List[Dict], institution_name: str) -> List[Dict]:
+        """
+        Format transactions with institution info and display formatting
+        
+        Args:
+            transactions: List of raw transactions from Plaid API
+            institution_name: Name of the institution
+            
+        Returns:
+            List of formatted transactions
+        """
+        formatted_transactions = []
+        for transaction in transactions:
+            transaction['institution_name'] = institution_name
+            transaction['formatted_amount'] = f"${abs(transaction['amount']):,.2f}"
+            transaction['transaction_type'] = 'debit' if transaction['amount'] > 0 else 'credit'
+            
+            # Extract personal finance category information
+            personal_finance_category = transaction.get('personal_finance_category', {})
+            if personal_finance_category:
+                transaction['category_primary'] = personal_finance_category.get('primary', 'OTHER')
+                transaction['category_detailed'] = personal_finance_category.get('detailed', 'OTHER')
+                transaction['category_confidence'] = personal_finance_category.get('confidence_level', 'UNKNOWN')
+            else:
+                # Fallback values if personal_finance_category is not available
+                transaction['category_primary'] = 'OTHER'
+                transaction['category_detailed'] = 'OTHER'
+                transaction['category_confidence'] = 'UNKNOWN'
+            
+            formatted_transactions.append(transaction)
+        
+        return formatted_transactions
+    
     def get_cached_accounts(self, user_id: int) -> Dict:
         """
         Get cached account information from database
@@ -309,6 +374,29 @@ class PlaidService:
                 # Store/update accounts in database
                 self.db.store_accounts(user_id, token_id, accounts)
                 
+                # If forcing refresh, also refresh transaction data for this institution
+                if force_refresh:
+                    try:
+                        # Calculate date range for transactions (last 30 days)
+                        end_date = datetime.datetime.now().date()
+                        start_date = end_date - datetime.timedelta(days=30)
+                        
+                        # Fetch transactions using helper function
+                        filtered_transactions = self._fetch_transactions_for_token(
+                            access_token, accounts, start_date, end_date
+                        )
+                        
+                        # Format transactions using helper function
+                        formatted_transactions = self._format_transactions(filtered_transactions, institution_name)
+                        
+                        # Store transactions in database
+                        self.db.store_transactions(user_id, formatted_transactions)
+                        
+                    except plaid.ApiException as trans_e:
+                        error_msg = f"Failed to refresh transactions from {institution_name}: {trans_e.body}"
+                        errors.append(error_msg)
+                        # Continue with accounts even if transaction refresh fails
+                
             except plaid.ApiException as e:
                 error_msg = f"Failed to get accounts from {institution_name}: {e.body}"
                 errors.append(error_msg)
@@ -326,7 +414,7 @@ class PlaidService:
         }
     
     def get_cached_transactions(self, user_id: int, account_types: Optional[list[str]] = None, 
-                              account_id: Optional[str] = None, limit: int = 100, offset: int = 0) -> Dict:
+                              account_id: Optional[str] = None, year: Optional[int] = None, month: Optional[int] = None, limit: int = 100, offset: int = 0) -> Dict:
         """
         Get cached transaction information from database
         
@@ -334,6 +422,8 @@ class PlaidService:
             user_id: The user ID
             account_types: Optional list of account types to filter by (e.g., ['depository', 'credit'])
             account_id: Optional specific account ID to filter by
+            year: Year to filter by (default: current year)
+            month: Optional month to filter by (1-12)
             limit: Maximum number of transactions to return
             offset: Number of transactions to skip
             
@@ -341,11 +431,15 @@ class PlaidService:
             Dictionary containing cached transaction information
         """
         try:
+            # Default to current year if not specified
+            if year is None:
+                year = datetime.datetime.now().year
+            
             # Get cached transactions from database
-            cached_transactions = self.db.get_cached_transactions(user_id, account_types, account_id, limit, offset)
+            cached_transactions = self.db.get_cached_transactions(user_id, account_types, account_id, year, month, limit, offset)
             
             # Get transaction summary
-            transaction_summary = self.db.get_transaction_summary(user_id, account_types, account_id)
+            transaction_summary = self.db.get_transaction_summary(user_id, account_types, account_id, year, month)
             
             return {
                 'transactions': cached_transactions,
@@ -359,23 +453,28 @@ class PlaidService:
             raise Exception(f"Failed to get cached transactions: {str(e)}")
     
     def get_transactions(self, user_id: int, account_types: Optional[list[str]] = None,
-                        account_id: Optional[str] = None, days: int = 30, force_refresh: bool = False) -> Dict:
+                        account_id: Optional[str] = None, year: Optional[int] = None, month: Optional[int] = None, force_refresh: bool = False) -> Dict:
         """
         Get user transactions from specified account types
         
         Args:
             user_id: The user ID
             account_types: List of account types to get transactions for (e.g., ['depository', 'credit'])
-            days: Number of days to fetch transactions for
+            year: Year to fetch transactions for (default: current year)
+            month: Optional month to filter by (1-12)
             force_refresh: If True, fetch fresh data from Plaid API
             
         Returns:
             Dictionary containing transaction information
         """
+        # Default to current year if not specified
+        if year is None:
+            year = datetime.datetime.now().year
+        
         # If not forcing refresh, try to get cached data first
         if not force_refresh:
             try:
-                cached_result = self.get_cached_transactions(user_id, account_types)
+                cached_result = self.get_cached_transactions(user_id, account_types, account_id, year, month)
                 if cached_result['transactions']:
                     return cached_result
             except Exception:
@@ -390,9 +489,18 @@ class PlaidService:
         all_transactions = []
         errors = []
         
-        # Calculate date range
-        end_date = datetime.datetime.now().date()
-        start_date = end_date - datetime.timedelta(days=days)
+        # Calculate date range based on year and month
+        if month:
+            # Specific month
+            start_date = datetime.date(year, month, 1)
+            if month == 12:
+                end_date = datetime.date(year + 1, 1, 1) - datetime.timedelta(days=1)
+            else:
+                end_date = datetime.date(year, month + 1, 1) - datetime.timedelta(days=1)
+        else:
+            # Entire year
+            start_date = datetime.date(year, 1, 1)
+            end_date = datetime.date(year, 12, 31)
         
         for token_data in tokens_data:
             access_token = token_data['access_token']
@@ -411,35 +519,18 @@ class PlaidService:
                 if not accounts:
                     continue
                 
-                # Get transactions for these accounts
-                transactions_request = TransactionsGetRequest(
-                    access_token=access_token,
-                    start_date=start_date,
-                    end_date=end_date
+                # Fetch transactions using helper function
+                filtered_transactions = self._fetch_transactions_for_token(
+                    access_token, accounts, start_date, end_date
                 )
                 
-                transactions_response = self.client.transactions_get(transactions_request)
-                transactions = transactions_response.to_dict()['transactions']
+                # Format transactions using helper function
+                formatted_transactions = self._format_transactions(filtered_transactions, institution_name)
                 
-                # Filter transactions to only include those from relevant accounts
-                relevant_account_ids = {acc['account_id'] for acc in accounts}
-                filtered_transactions = [
-                    t for t in transactions 
-                    if t.get('account_id') in relevant_account_ids
-                ]
-                
-                # Add institution info to each transaction
-                for transaction in filtered_transactions:
-                    transaction['institution_name'] = institution_name
-                    
-                    # Format transaction for display
-                    transaction['formatted_amount'] = f"${abs(transaction['amount']):,.2f}"
-                    transaction['transaction_type'] = 'debit' if transaction['amount'] > 0 else 'credit'
-                
-                all_transactions.extend(filtered_transactions)
+                all_transactions.extend(formatted_transactions)
                 
                 # Store transactions in database
-                self.db.store_transactions(user_id, filtered_transactions)
+                self.db.store_transactions(user_id, formatted_transactions)
                 
             except plaid.ApiException as e:
                 error_msg = f"Failed to get transactions from {institution_name}: {e.body}"
@@ -450,7 +541,7 @@ class PlaidService:
         all_transactions.sort(key=lambda x: x.get('date', ''), reverse=True)
         
         # Get transaction summary
-        transaction_summary = self.db.get_transaction_summary(user_id, account_types, None, days)
+        transaction_summary = self.db.get_transaction_summary(user_id, account_types, None, year, month)
         
         return {
             'transactions': all_transactions,
@@ -459,7 +550,8 @@ class PlaidService:
             'errors': errors,
             'is_cached': False,
             'account_types_filter': account_types,
-            'period_days': days
+            'period_year': year,
+            'period_month': month
         }
     
     def has_access_token(self, user_id: int) -> bool:

@@ -3,7 +3,6 @@
 {% block content %}
 <div class="user-info">
     <h3>Welcome, {{ user.username }}!</h3>
-    <p><strong>User ID:</strong> {{ user.id }}</p>
     <div class="user-actions">
         <a href="{{ url_for('logout') }}" class="btn-secondary">Logout</a>
     </div>
@@ -51,11 +50,7 @@
                 </div>
             {% endif %}
             
-            {% if token_info.item_id %}
-                <div class="info-item">
-                    <strong>Item ID:</strong> {{ token_info.item_id }}
-                </div>
-            {% endif %}
+
             
             {% if token_info.updated_at %}
                 <div class="info-item">
@@ -205,7 +200,6 @@
                                     {% endif %}
                                     
                                     <div class="account-meta">
-                                        <small><strong>Account ID:</strong> {{ account.account_id }}</small>
                                         {% if account.updated_at %}
                                             <small><strong>Updated:</strong> {{ account.updated_at[:19] }}</small>
                                         {% endif %}

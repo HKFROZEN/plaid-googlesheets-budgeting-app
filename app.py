@@ -248,16 +248,36 @@ def get_transactions():
         # Get query parameters
         account_types = request.args.getlist('account_types')  # e.g., ?account_types=depository&account_types=credit
         days = int(request.args.get('days', 30))
+        year = request.args.get('year')
+        month = request.args.get('month')
         force_refresh = request.args.get('refresh') == 'true'
         
         # Default to checking and credit card accounts if no filter specified
         if not account_types:
             account_types = ['depository', 'credit']
         
+        # Convert string parameters to integers if provided and not empty
+        year_int = None
+        month_int = None
+        
+        if year and year.strip():
+            year_int = int(year)
+        if month and month.strip():
+            month_int = int(month)
+        
+        # If no explicit year/month provided, but days is provided, use current date logic
+        if year_int is None and month_int is None and days:
+            from datetime import datetime
+            current_date = datetime.now()
+            year_int = current_date.year
+            # For days-based filtering, use current month
+            month_int = current_date.month
+        
         transactions = service.get_transactions(
             user_id, 
-            account_types=account_types, 
-            days=days, 
+            account_types=account_types,
+            year=year_int if year_int is not None else None,
+            month=month_int if month_int is not None else None,
             force_refresh=force_refresh
         )
         return jsonify(transactions)
@@ -277,12 +297,32 @@ def get_checking_transactions():
         
         # Get query parameters
         days = int(request.args.get('days', 30))
+        year = request.args.get('year')
+        month = request.args.get('month')
         force_refresh = request.args.get('refresh') == 'true'
+        
+        # Convert string parameters to integers if provided and not empty
+        year_int = None
+        month_int = None
+        
+        if year and year.strip():
+            year_int = int(year)
+        if month and month.strip():
+            month_int = int(month)
+        
+        # If no explicit year/month provided, but days is provided, use current date logic
+        if year_int is None and month_int is None and days:
+            from datetime import datetime
+            current_date = datetime.now()
+            year_int = current_date.year
+            # For days-based filtering, use current month
+            month_int = current_date.month
         
         transactions = service.get_transactions(
             user_id, 
-            account_types=['depository'], 
-            days=days, 
+            account_types=['depository'],
+            year=year_int,
+            month=month_int,
             force_refresh=force_refresh
         )
         return jsonify(transactions)
@@ -302,12 +342,32 @@ def get_credit_transactions():
         
         # Get query parameters
         days = int(request.args.get('days', 30))
+        year = request.args.get('year')
+        month = request.args.get('month')
         force_refresh = request.args.get('refresh') == 'true'
+        
+        # Convert string parameters to integers if provided and not empty
+        year_int = None
+        month_int = None
+        
+        if year and year.strip():
+            year_int = int(year)
+        if month and month.strip():
+            month_int = int(month)
+        
+        # If no explicit year/month provided, but days is provided, use current date logic
+        if year_int is None and month_int is None and days:
+            from datetime import datetime
+            current_date = datetime.now()
+            year_int = current_date.year
+            # For days-based filtering, use current month
+            month_int = current_date.month
         
         transactions = service.get_transactions(
             user_id, 
-            account_types=['credit'], 
-            days=days, 
+            account_types=['credit'],
+            year=year_int,
+            month=month_int,
             force_refresh=force_refresh
         )
         return jsonify(transactions)

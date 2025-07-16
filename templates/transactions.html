@@ -91,7 +91,18 @@
 
 <!-- Top Categories -->
 <div id="top-categories" class="categories-section">
-    {% if transactions_data.summary and transactions_data.summary.top_categories %}
+    {% if transactions_data.summary and transactions_data.summary.top_primary_categories %}
+        <h4>Top Spending Categories (Plaid Enhanced)</h4>
+        <div class="categories-grid">
+            {% for category in transactions_data.summary.top_primary_categories %}
+                <div class="category-card primary">
+                    <div class="category-name">{{ category.category }}</div>
+                    <div class="category-amount">${{ "{:,.2f}".format(category.total_amount) }}</div>
+                    <div class="category-count">{{ category.transaction_count }} transactions</div>
+                </div>
+            {% endfor %}
+        </div>
+    {% elif transactions_data.summary and transactions_data.summary.top_categories %}
         <h4>Top Spending Categories</h4>
         <div class="categories-grid">
             {% for category in transactions_data.summary.top_categories %}
@@ -141,9 +152,17 @@
                             <span class="amount {{ transaction.transaction_type }}">
                                 {% if transaction.transaction_type == 'debit' %}+{% else %}-{% endif %}{{ transaction.formatted_amount }}
                             </span>
-                            {% if transaction.category %}
-                                <span class="category-tag">{{ transaction.category }}</span>
-                            {% endif %}
+                            <div class="category-tags">
+                                {% if transaction.category_primary and transaction.category_primary != 'OTHER' %}
+                                    <span class="category-tag primary">{{ transaction.category_primary }}</span>
+                                {% endif %}
+                                {% if transaction.category_detailed and transaction.category_detailed != 'OTHER' %}
+                                    <span class="category-tag detailed">{{ transaction.category_detailed }}</span>
+                                {% endif %}
+                                {% if transaction.category %}
+                                    <span class="category-tag legacy">{{ transaction.category }}</span>
+                                {% endif %}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -211,7 +230,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 updateSummary(data.summary);
                 
                 // Update categories
-                updateCategories(data.summary.top_categories);
+                updateCategories(data.summary);
                 
                 // Update transactions list
                 updateTransactionsList(data.transactions, data.is_cached);
@@ -263,24 +282,44 @@ document.addEventListener('DOMContentLoaded', function() {
         transactionSummary.innerHTML = summaryHtml;
     }
     
-    function updateCategories(categories) {
-        if (!categories || categories.length === 0) {
+    function updateCategories(summary) {
+        if (!summary) {
             topCategories.innerHTML = '<p>No category data available.</p>';
             return;
         }
         
-        const categoriesHtml = `
-            <h4>Top Spending Categories</h4>
-            <div class="categories-grid">
-                ${categories.map(cat => `
-                    <div class="category-card">
-                        <div class="category-name">${cat.category}</div>
-                        <div class="category-amount">$${cat.total_amount.toLocaleString('en-US', {minimumFractionDigits: 2})}</div>
-                        <div class="category-count">${cat.transaction_count} transactions</div>
-                    </div>
-                `).join('')}
-            </div>
-        `;
+        let categoriesHtml = '';
+        
+        if (summary.top_primary_categories && summary.top_primary_categories.length > 0) {
+            categoriesHtml = `
+                <h4>Top Spending Categories (Plaid Enhanced)</h4>
+                <div class="categories-grid">
+                    ${summary.top_primary_categories.map(cat => `
+                        <div class="category-card primary">
+                            <div class="category-name">${cat.category}</div>
+                            <div class="category-amount">$${cat.total_amount.toLocaleString('en-US', {minimumFractionDigits: 2})}</div>
+                            <div class="category-count">${cat.transaction_count} transactions</div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        } else if (summary.top_categories && summary.top_categories.length > 0) {
+            categoriesHtml = `
+                <h4>Top Spending Categories</h4>
+                <div class="categories-grid">
+                    ${summary.top_categories.map(cat => `
+                        <div class="category-card">
+                            <div class="category-name">${cat.category}</div>
+                            <div class="category-amount">$${cat.total_amount.toLocaleString('en-US', {minimumFractionDigits: 2})}</div>
+                            <div class="category-count">${cat.transaction_count} transactions</div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        } else {
+            categoriesHtml = '<p>No category data available.</p>';
+        }
+        
         topCategories.innerHTML = categoriesHtml;
     }
     
@@ -302,8 +341,20 @@ document.addEventListener('DOMContentLoaded', function() {
             transactions.forEach(transaction => {
                 const amountPrefix = transaction.transaction_type === 'debit' ? '+' : '-';
                 const pendingBadge = transaction.pending ? '<span class="pending-badge">Pending</span>' : '';
-                const categoryTag = transaction.category ? `<span class="category-tag">${transaction.category}</span>` : '';
                 const merchantName = transaction.merchant_name ? `<p class="merchant-name">${transaction.merchant_name}</p>` : '';
+                
+                // Build category tags
+                let categoryTags = '<div class="category-tags">';
+                if (transaction.category_primary && transaction.category_primary !== 'OTHER') {
+                    categoryTags += `<span class="category-tag primary">${transaction.category_primary}</span>`;
+                }
+                if (transaction.category_detailed && transaction.category_detailed !== 'OTHER') {
+                    categoryTags += `<span class="category-tag detailed">${transaction.category_detailed}</span>`;
+                }
+                if (transaction.category) {
+                    categoryTags += `<span class="category-tag legacy">${transaction.category}</span>`;
+                }
+                categoryTags += '</div>';
                 
                 transactionsHtml += `
                     <div class="transaction-item ${transaction.transaction_type}">
@@ -322,7 +373,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                 <span class="amount ${transaction.transaction_type}">
                                     ${amountPrefix}${transaction.formatted_amount}
                                 </span>
-                                ${categoryTag}
+                                ${categoryTags}
                             </div>
                         </div>
                     </div>

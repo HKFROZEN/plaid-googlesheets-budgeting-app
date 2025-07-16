@@ -437,8 +437,9 @@ class DatabaseManager:
                             unofficial_currency_code, date, datetime, authorized_date,
                             authorized_datetime, name, merchant_name, account_owner,
                             category, subcategory, transaction_type, pending,
-                            institution_name, updated_at
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                            institution_name, category_primary, category_detailed,
+                            category_confidence, updated_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                         ON CONFLICT (user_id, transaction_id) DO UPDATE SET
                             amount = EXCLUDED.amount,
                             iso_currency_code = EXCLUDED.iso_currency_code,
@@ -455,6 +456,9 @@ class DatabaseManager:
                             transaction_type = EXCLUDED.transaction_type,
                             pending = EXCLUDED.pending,
                             institution_name = EXCLUDED.institution_name,
+                            category_primary = EXCLUDED.category_primary,
+                            category_detailed = EXCLUDED.category_detailed,
+                            category_confidence = EXCLUDED.category_confidence,
                             updated_at = CURRENT_TIMESTAMP
                     ''', (
                         user_id, account_id, transaction_id, amount,
@@ -468,7 +472,10 @@ class DatabaseManager:
                         category, subcategory,
                         transaction.get('transaction_type'),
                         transaction.get('pending', False),
-                        transaction.get('institution_name')
+                        transaction.get('institution_name'),
+                        transaction.get('category_primary', 'OTHER'),
+                        transaction.get('category_detailed', 'OTHER'),
+                        transaction.get('category_confidence', 'UNKNOWN')
                     ))
                 
                 conn.commit()
@@ -479,7 +486,7 @@ class DatabaseManager:
             return False
     
     def get_cached_transactions(self, user_id: int, account_types: Optional[list[str]] = None, 
-                              account_id: Optional[str] = None, limit: int = 100, offset: int = 0) -> list[Dict[str, Any]]:
+                              account_id: Optional[str] = None, year: Optional[int] = None, month: Optional[int] = None, limit: int = 100, offset: int = 0) -> list[Dict[str, Any]]:
         """Get cached transaction information from database"""
         with self.get_connection() as conn:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -492,7 +499,18 @@ class DatabaseManager:
                 JOIN accounts a ON t.account_id = a.account_id AND t.user_id = a.user_id
                 WHERE t.user_id = %s AND a.is_active = TRUE
             '''
-            params = [user_id]
+            params: list[Any] = [user_id]
+            
+            # Add year/month filtering
+            if year is not None:
+                if month is not None:
+                    # Specific month
+                    query += ' AND EXTRACT(YEAR FROM t.date) = %s AND EXTRACT(MONTH FROM t.date) = %s'
+                    params.extend([year, month])
+                else:
+                    # Entire year
+                    query += ' AND EXTRACT(YEAR FROM t.date) = %s'
+                    params.append(year)
             
             if account_id:
                 query += ' AND t.account_id = %s'
@@ -522,6 +540,9 @@ class DatabaseManager:
                     'merchant_name': transaction_dict['merchant_name'],
                     'category': transaction_dict['category'],
                     'subcategory': transaction_dict['subcategory'],
+                    'category_primary': transaction_dict.get('category_primary', 'OTHER'),
+                    'category_detailed': transaction_dict.get('category_detailed', 'OTHER'),
+                    'category_confidence': transaction_dict.get('category_confidence', 'UNKNOWN'),
                     'date': transaction_dict['date'],
                     'pending': transaction_dict['pending'],
                     'institution_name': transaction_dict['institution_name'],
@@ -534,7 +555,7 @@ class DatabaseManager:
             return transactions
     
     def get_transaction_summary(self, user_id: int, account_types: Optional[list[str]] = None, 
-                              account_id: Optional[str] = None, days: int = 30) -> Dict[str, Any]:
+                              account_id: Optional[str] = None, year: Optional[int] = None, month: Optional[int] = None) -> Dict[str, Any]:
         """Get transaction summary statistics"""
         with self.get_connection() as conn:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
@@ -549,10 +570,20 @@ class DatabaseManager:
                 FROM transactions t
                 JOIN accounts a ON t.account_id = a.account_id AND t.user_id = a.user_id
                 WHERE t.user_id = %s AND a.is_active = TRUE
-                AND t.date >= CURRENT_DATE - INTERVAL '%s days'
             '''
             
-            params = [user_id, days]
+            params: list[Any] = [user_id]
+            
+            # Add year/month filtering
+            if year is not None:
+                if month is not None:
+                    # Specific month
+                    query += ' AND EXTRACT(YEAR FROM t.date) = %s AND EXTRACT(MONTH FROM t.date) = %s'
+                    params.extend([year, month])
+                else:
+                    # Entire year
+                    query += ' AND EXTRACT(YEAR FROM t.date) = %s'
+                    params.append(year)
             
             if account_id:
                 query += ' AND t.account_id = %s'
@@ -574,9 +605,17 @@ class DatabaseManager:
                 FROM transactions t
                 JOIN accounts a ON t.account_id = a.account_id AND t.user_id = a.user_id
                 WHERE t.user_id = %s AND a.is_active = TRUE
-                AND t.date >= CURRENT_DATE - INTERVAL '%s days'
                 AND t.category IS NOT NULL
             '''
+            
+            # Add year/month filtering to category query
+            if year is not None:
+                if month is not None:
+                    # Specific month
+                    category_query += ' AND EXTRACT(YEAR FROM t.date) = %s AND EXTRACT(MONTH FROM t.date) = %s'
+                else:
+                    # Entire year
+                    category_query += ' AND EXTRACT(YEAR FROM t.date) = %s'
             
             if account_id:
                 category_query += ' AND t.account_id = %s'
@@ -595,6 +634,57 @@ class DatabaseManager:
                     'total_amount': float(cat_row['total_amount'])
                 })
             
+            # Get spending by primary category (new Plaid categorization)
+            primary_category_query = '''
+                SELECT 
+                    t.category_primary,
+                    COUNT(*) as transaction_count,
+                    SUM(ABS(t.amount)) as total_amount
+                FROM transactions t
+                JOIN accounts a ON t.account_id = a.account_id AND t.user_id = a.user_id
+                WHERE t.user_id = %s AND a.is_active = TRUE
+                AND t.category_primary IS NOT NULL
+                AND t.category_primary != 'OTHER'
+            '''
+            
+            # Add year/month filtering to primary category query
+            if year is not None:
+                if month is not None:
+                    # Specific month
+                    primary_category_query += ' AND EXTRACT(YEAR FROM t.date) = %s AND EXTRACT(MONTH FROM t.date) = %s'
+                else:
+                    # Entire year
+                    primary_category_query += ' AND EXTRACT(YEAR FROM t.date) = %s'
+            
+            if account_id:
+                primary_category_query += ' AND t.account_id = %s'
+            elif account_types:
+                placeholders = ','.join(['%s' for _ in account_types])
+                primary_category_query += f' AND a.type IN ({placeholders})'
+            
+            primary_category_query += ' GROUP BY t.category_primary ORDER BY total_amount DESC LIMIT 10'
+            
+            cursor.execute(primary_category_query, params)
+            primary_categories = []
+            for cat_row in cursor.fetchall():
+                primary_categories.append({
+                    'category': cat_row['category_primary'],
+                    'transaction_count': cat_row['transaction_count'],
+                    'total_amount': float(cat_row['total_amount'])
+                })
+            
+            # Calculate period days
+            if year is not None and month is not None:
+                # Specific month - calculate days in that month
+                import calendar
+                days = calendar.monthrange(year, month)[1]
+            elif year is not None:
+                # Entire year - 365 or 366 days
+                days = 366 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 365
+            else:
+                # Default to 30 days
+                days = 30
+            
             return {
                 'total_transactions': row['total_transactions'] or 0,
                 'total_debits': float(row['total_debits']) if row['total_debits'] else 0,
@@ -602,6 +692,7 @@ class DatabaseManager:
                 'avg_transaction_amount': float(row['avg_transaction_amount']) if row['avg_transaction_amount'] else 0,
                 'net_flow': (float(row['total_debits']) if row['total_debits'] else 0) - (float(row['total_credits']) if row['total_credits'] else 0),
                 'top_categories': categories,
+                'top_primary_categories': primary_categories,
                 'period_days': days
             }
     
