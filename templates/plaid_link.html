@@ -36,147 +36,316 @@
 <script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
 <script>
 (function() {
+    'use strict';
+    
+    // Configuration
+    const DEBUG = true; // Set to false to disable debug logging
     const isAdditionalAccount = "{{ is_additional_account or 'false' }}" === "True";
     
-    // First, get a link token from the server
-    fetch('/create_link_token', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
+    // Global variables
+    let linkHandler = null;
+    let linkToken = null;
+    
+    // Debug logging function
+    function debugLog(message, data = null) {
+        if (DEBUG) {
+            console.log(`[PlaidLink] ${message}`, data || '');
         }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.error) {
-            throw new Error(data.error);
-        }
+    }
+    
+    // Error handling and display functions
+    function showError(title, message, details = null) {
+        debugLog(`Error: ${title} - ${message}`, details);
         
-        // Configuration from server
-        const config = {
-            token: data.link_token,
-            onSuccess: function(public_token, metadata) {
-                // Display the public token
-                document.getElementById('link-result').style.display = 'block';
-                
-                if (isAdditionalAccount) {
-                    document.getElementById('link-result').innerHTML = `
-                        <div class="alert alert-success">
-                            <h4>✅ Account Connected Successfully!</h4>
-                            <p><strong>Institution:</strong> ${metadata.institution.name}</p>
-                            <p><strong>Accounts:</strong> ${metadata.accounts.length} account(s) connected</p>
-                            <p><strong>Status:</strong> Access token obtained automatically</p>
-                            <p><a href="/" class="btn-primary">View Your Accounts</a></p>
-                        </div>
-                    `;
-                } else {
-                    document.getElementById('link-result').innerHTML = `
-                        <div class="alert alert-success">
-                            <h4>✅ Account Connected Successfully!</h4>
-                            <p><strong>Institution:</strong> ${metadata.institution.name}</p>
-                            <p><strong>Accounts:</strong> ${metadata.accounts.length} account(s) connected</p>
-                            <p><strong>Status:</strong> Access token obtained automatically</p>
-                            <p><a href="/" class="btn-primary">View Your Accounts</a></p>
-                        </div>
-                    `;
-                }
-                
-                // Send the public token to the backend for automatic exchange
-                fetch('/store_public_token', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        public_token: public_token,
-                        metadata: metadata
-                    })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        // Update the display to show successful exchange
-                        document.getElementById('link-result').innerHTML = `
-                            <div class="alert alert-success">
-                                <h4>✅ Account Connected Successfully!</h4>
-                                <p><strong>Institution:</strong> ${data.institution_name}</p>
-                                <p><strong>Accounts:</strong> ${data.accounts_count} account(s) connected</p>
-                                <p><strong>Status:</strong> Ready to use - access token obtained automatically</p>
-                                <div class="success-actions">
-                                    <a href="/" class="btn-primary">View Your Accounts</a>
-                                    ${isAdditionalAccount ? '<a href="/add_account" class="btn-secondary">Add Another Account</a>' : ''}
-                                </div>
-                            </div>
-                        `;
-                    } else {
-                        // Show error from backend
-                        document.getElementById('link-result').innerHTML = `
-                            <div class="alert alert-error">
-                                <h4>❌ Connection Failed</h4>
-                                <p><strong>Error:</strong> ${data.error || 'Unknown error occurred'}</p>
-                                <p>The account was connected to Plaid but we couldn't complete the setup.</p>
-                                <div class="error-actions">
-                                    <a href="/" class="btn-primary">Try Again</a>
-                                </div>
-                            </div>
-                        `;
-                    }
-                })
-                .catch(error => {
-                    console.error('Error during token exchange:', error);
-                    document.getElementById('link-result').innerHTML = `
-                        <div class="alert alert-error">
-                            <h4>❌ Connection Failed</h4>
-                            <p><strong>Error:</strong> Failed to complete account setup</p>
-                            <p>The account was connected to Plaid but we couldn't complete the setup.</p>
-                            <div class="error-actions">
-                                <a href="/" class="btn-primary">Try Again</a>
-                            </div>
-                        </div>
-                    `;
-                });
-            },
-            onExit: function(err, metadata) {
-                if (err != null) {
-                    console.error('Plaid Link error:', err);
-                    document.getElementById('link-result').style.display = 'block';
-                    document.getElementById('link-result').innerHTML = `
-                        <div class="alert alert-error">
-                            <h4>Error:</h4>
-                            <p>${err.display_message || 'An error occurred during bank connection.'}</p>
-                        </div>
-                    `;
-                }
-            }
-        };
-
-        // Initialize Plaid Link
-        const linkHandler = Plaid.create(config);
-        
-        // Handle button click
-        document.getElementById('link-button').addEventListener('click', function() {
-            linkHandler.open();
-        });
-    })
-    .catch(error => {
-        console.error('Error getting link token:', error);
-        document.getElementById('link-result').style.display = 'block';
-        document.getElementById('link-result').innerHTML = `
+        const resultDiv = document.getElementById('link-result');
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = `
             <div class="alert alert-error">
-                <h4>Error:</h4>
-                <p>Failed to initialize Plaid Link: ${error.message}</p>
+                <h4>❌ ${title}</h4>
+                <p><strong>Error:</strong> ${message}</p>
+                ${details ? `<p><small>Details: ${details}</small></p>` : ''}
+                <div class="error-actions">
+                    <a href="/" class="btn-primary">Try Again</a>
+                </div>
             </div>
         `;
-    });
+    }
+    
+    function showSuccess(title, institution, accountsCount, isReady = false) {
+        debugLog(`Success: ${title}`, { institution, accountsCount, isReady });
+        
+        const resultDiv = document.getElementById('link-result');
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = `
+            <div class="alert alert-success">
+                <h4>✅ ${title}</h4>
+                <p><strong>Institution:</strong> ${institution}</p>
+                <p><strong>Accounts:</strong> ${accountsCount} account(s) connected</p>
+                <p><strong>Status:</strong> ${isReady ? 'Ready to use - access token obtained automatically' : 'Access token obtained automatically'}</p>
+                <div class="success-actions">
+                    <a href="/" class="btn-primary">View Your Accounts</a>
+                    ${isAdditionalAccount ? '<a href="/add_account" class="btn-secondary">Add Another Account</a>' : ''}
+                </div>
+            </div>
+        `;
+    }
+    
+    function showInitialSuccess(institution, accountsCount) {
+        debugLog('Initial success display', { institution, accountsCount });
+        
+        const resultDiv = document.getElementById('link-result');
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = `
+            <div class="alert alert-success">
+                <h4>✅ Account Connected Successfully!</h4>
+                <p><strong>Institution:</strong> ${institution}</p>
+                <p><strong>Accounts:</strong> ${accountsCount} account(s) connected</p>
+                <p><strong>Status:</strong> Processing connection...</p>
+                <div class="spinner">🔄 Setting up your account...</div>
+            </div>
+        `;
+    }
+    
+    // API call functions
+    async function fetchLinkToken() {
+        debugLog('Fetching link token from server...');
+        
+        try {
+            const response = await fetch('/create_link_token', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            
+            linkToken = data.link_token;
+            debugLog('Link token fetched successfully', { tokenLength: linkToken?.length });
+            
+            return data;
+            
+        } catch (error) {
+            debugLog('Failed to fetch link token', error);
+            throw new Error(`Failed to get link token: ${error.message}`);
+        }
+    }
+    
+    async function storePublicToken(publicToken, metadata) {
+        debugLog('Storing public token...', { 
+            publicTokenLength: publicToken?.length,
+            institution: metadata?.institution?.name,
+            accountsCount: metadata?.accounts?.length 
+        });
+        
+        try {
+            const response = await fetch('/store_public_token', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    public_token: publicToken,
+                    metadata: metadata
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            debugLog('Public token stored', data);
+            
+            if (!data.success) {
+                throw new Error(data.error || 'Unknown error occurred during token storage');
+            }
+            
+            return data;
+            
+        } catch (error) {
+            debugLog('Failed to store public token', error);
+            throw error;
+        }
+    }
+    
+    // Plaid Link event handlers
+    async function handlePlaidSuccess(publicToken, metadata) {
+        debugLog('Plaid Link success callback triggered', { 
+            publicTokenLength: publicToken?.length,
+            metadata 
+        });
+        
+        try {
+            const institutionName = metadata?.institution?.name || 'Unknown Institution';
+            const accountsCount = metadata?.accounts?.length || 0;
+            
+            // Show initial success message
+            showInitialSuccess(institutionName, accountsCount);
+            
+            // Store the public token and exchange it
+            const result = await storePublicToken(publicToken, metadata);
+            
+            // Show final success message
+            showSuccess(
+                'Account Connected Successfully!',
+                result.institution_name || institutionName,
+                result.accounts_count || accountsCount,
+                true
+            );
+            
+        } catch (error) {
+            debugLog('Error in handlePlaidSuccess', error);
+            showError(
+                'Connection Failed',
+                'Failed to complete account setup',
+                error.message
+            );
+        }
+    }
+    
+    function handlePlaidExit(error, metadata) {
+        debugLog('Plaid Link exit callback triggered', { error, metadata });
+        
+        if (error) {
+            const errorMessage = error.display_message || error.error_message || 'An error occurred during bank connection';
+            const errorCode = error.error_code || 'UNKNOWN_ERROR';
+            
+            showError(
+                'Connection Error',
+                errorMessage,
+                `Error code: ${errorCode}`
+            );
+        } else {
+            debugLog('User exited Plaid Link without error');
+            // User simply closed the modal, no need to show error
+        }
+    }
+    
+    // Plaid Link initialization
+    function initializePlaidLink(linkTokenData) {
+        debugLog('Initializing Plaid Link...', { 
+            tokenLength: linkTokenData?.link_token?.length 
+        });
+        
+        try {
+            const config = {
+                token: linkTokenData.link_token,
+                onSuccess: handlePlaidSuccess,
+                onExit: handlePlaidExit
+            };
+            
+            linkHandler = Plaid.create(config);
+            debugLog('Plaid Link initialized successfully');
+            
+            return linkHandler;
+            
+        } catch (error) {
+            debugLog('Failed to initialize Plaid Link', error);
+            throw new Error(`Failed to initialize Plaid Link: ${error.message}`);
+        }
+    }
+    
+    // Event listeners
+    function setupEventListeners() {
+        debugLog('Setting up event listeners...');
+        
+        const linkButton = document.getElementById('link-button');
+        
+        if (!linkButton) {
+            throw new Error('Link button not found in DOM');
+        }
+        
+        linkButton.addEventListener('click', function() {
+            debugLog('Link button clicked');
+            
+            if (!linkHandler) {
+                showError('Initialization Error', 'Plaid Link not initialized');
+                return;
+            }
+            
+            try {
+                linkHandler.open();
+                debugLog('Plaid Link opened successfully');
+            } catch (error) {
+                debugLog('Failed to open Plaid Link', error);
+                showError('Connection Error', 'Failed to open Plaid Link', error.message);
+            }
+        });
+        
+        debugLog('Event listeners set up successfully');
+    }
+    
+    // Main initialization function
+    async function initializePlaidFlow() {
+        debugLog('Starting Plaid Link initialization flow...');
+        
+        try {
+            // Step 1: Fetch link token
+            const linkTokenData = await fetchLinkToken();
+            
+            // Step 2: Initialize Plaid Link
+            initializePlaidLink(linkTokenData);
+            
+            // Step 3: Set up event listeners
+            setupEventListeners();
+            
+            debugLog('Plaid Link flow initialized successfully');
+            
+        } catch (error) {
+            debugLog('Failed to initialize Plaid Link flow', error);
+            showError(
+                'Initialization Failed',
+                'Failed to initialize Plaid Link',
+                error.message
+            );
+        }
+    }
+    
+    // Utility functions
+    function copyToClipboard(text) {
+        debugLog('Copying to clipboard', { textLength: text?.length });
+        
+        navigator.clipboard.writeText(text).then(function() {
+            debugLog('Text copied to clipboard successfully');
+            // Show copied feedback
+            event.target.textContent = 'Copied!';
+            setTimeout(function() {
+                event.target.textContent = 'Copy';
+            }, 2000);
+        }).catch(function(error) {
+            debugLog('Failed to copy to clipboard', error);
+            console.error('Failed to copy to clipboard:', error);
+        });
+    }
+    
+    // Start the initialization when DOM is ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initializePlaidFlow);
+    } else {
+        initializePlaidFlow();
+    }
+    
+    // Expose functions for debugging (only in debug mode)
+    if (DEBUG) {
+        window.PlaidLinkDebug = {
+            fetchLinkToken,
+            storePublicToken,
+            initializePlaidLink,
+            linkHandler: () => linkHandler,
+            linkToken: () => linkToken
+        };
+        debugLog('Debug functions exposed on window.PlaidLinkDebug');
+    }
+    
 })();
-
-function copyToClipboard(text) {
-    navigator.clipboard.writeText(text).then(function() {
-        // Show copied feedback
-        event.target.textContent = 'Copied!';
-        setTimeout(function() {
-            event.target.textContent = 'Copy';
-        }, 2000);
-    });
-}
 </script>
 {% endblock %} 

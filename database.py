@@ -60,6 +60,7 @@ class DatabaseManager:
                     iso_currency_code TEXT DEFAULT 'USD',
                     unofficial_currency_code TEXT,
                     account_classification TEXT NOT NULL CHECK (account_classification IN ('asset', 'liability')),
+                    custom_name TEXT,
                     is_active BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -121,12 +122,20 @@ class DatabaseManager:
             if 'category_confidence' not in transaction_columns:
                 cursor.execute('ALTER TABLE transactions ADD COLUMN category_confidence TEXT')
             
+            # Add custom_name column to accounts table if it doesn't exist
+            cursor.execute("PRAGMA table_info(accounts)")
+            account_columns = [column[1] for column in cursor.fetchall()]
+            
+            if 'custom_name' not in account_columns:
+                cursor.execute('ALTER TABLE accounts ADD COLUMN custom_name TEXT')
+            
             # Create indexes for faster lookups
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_tokens_user_id ON user_tokens(user_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_accounts_user_id ON accounts(user_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_accounts_token_id ON accounts(token_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_accounts_account_id ON accounts(account_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_accounts_custom_name ON accounts(custom_name)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions(user_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_transactions_account_id ON transactions(account_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date)')
@@ -343,21 +352,27 @@ class DatabaseManager:
                     current_balance = balances.get('current')
                     available_balance = balances.get('available')
                     
+                    # Check if account already exists to preserve custom_name
+                    cursor.execute('SELECT custom_name FROM accounts WHERE user_id = ? AND account_id = ?', 
+                                 (user_id, account['account_id']))
+                    existing_account = cursor.fetchone()
+                    existing_custom_name = existing_account['custom_name'] if existing_account else None
+                    
                     # Insert or update account
                     cursor.execute('''
                         INSERT OR REPLACE INTO accounts (
                             user_id, token_id, account_id, name, type, subtype, 
                             institution_name, current_balance, available_balance,
                             iso_currency_code, unofficial_currency_code, account_classification,
-                            is_active, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                            custom_name, is_active, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ''', (
                         user_id, token_id, account['account_id'], account['name'],
                         account['type'], account.get('subtype'), account.get('institution_name'),
                         current_balance, available_balance,
                         balances.get('iso_currency_code', 'USD'),
                         balances.get('unofficial_currency_code'),
-                        classification, True
+                        classification, existing_custom_name, True
                     ))
                 
                 conn.commit()
@@ -397,6 +412,8 @@ class DatabaseManager:
                     'institution_name': account_dict['institution_name'],
                     'token_id': account_dict['token_id'],
                     'account_classification': account_dict['account_classification'],
+                    'custom_name': account_dict['custom_name'],
+                    'display_name': account_dict['custom_name'] if account_dict['custom_name'] else account_dict['name'],
                     'updated_at': account_dict['updated_at'],
                     'formatted_balance': f"${account_dict['current_balance']:,.2f}" if account_dict['current_balance'] is not None else "N/A"
                 }
@@ -490,6 +507,34 @@ class DatabaseManager:
                 'net_worth': (classification_summary.get('asset', {}).get('total_balance', 0) - 
                             classification_summary.get('liability', {}).get('total_balance', 0))
             }
+    
+    def update_account_custom_name(self, user_id: int, account_id: str, custom_name: Optional[str]) -> bool:
+        """Update the custom name for an account"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Trim whitespace and convert empty string to None
+                custom_name = custom_name.strip() if custom_name else None
+                if custom_name == '':
+                    custom_name = None
+                
+                cursor.execute('''
+                    UPDATE accounts 
+                    SET custom_name = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = ? AND account_id = ?
+                ''', (custom_name, user_id, account_id))
+                
+                # Check if any rows were updated
+                if cursor.rowcount > 0:
+                    conn.commit()
+                    return True
+                else:
+                    return False
+                    
+        except sqlite3.Error as e:
+            print(f"Error updating account custom name: {e}")
+            return False
     
     def store_transactions(self, user_id: int, transactions_data: list[Dict[str, Any]]) -> bool:
         """Store transaction information in the database"""

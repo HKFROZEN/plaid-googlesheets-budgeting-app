@@ -35,8 +35,38 @@
             </div>
             
             <div class="filter-group">
-                <label for="days-filter">Time Period:</label>
+                <label for="year-filter">Year:</label>
+                <select id="year-filter" class="filter-select">
+                    <option value="">All Years</option>
+                    {% for year in year_list %}
+                        <option value="{{ year }}" {% if year == current_year %}selected{% endif %}>{{ year }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label for="month-filter">Month:</label>
+                <select id="month-filter" class="filter-select">
+                    <option value="">All Months</option>
+                    <option value="January" {% if current_month_name == 'January' %}selected{% endif %}>January</option>
+                    <option value="February" {% if current_month_name == 'February' %}selected{% endif %}>February</option>
+                    <option value="March" {% if current_month_name == 'March' %}selected{% endif %}>March</option>
+                    <option value="April" {% if current_month_name == 'April' %}selected{% endif %}>April</option>
+                    <option value="May" {% if current_month_name == 'May' %}selected{% endif %}>May</option>
+                    <option value="June" {% if current_month_name == 'June' %}selected{% endif %}>June</option>
+                    <option value="July" {% if current_month_name == 'July' %}selected{% endif %}>July</option>
+                    <option value="August" {% if current_month_name == 'August' %}selected{% endif %}>August</option>
+                    <option value="September" {% if current_month_name == 'September' %}selected{% endif %}>September</option>
+                    <option value="October" {% if current_month_name == 'October' %}selected{% endif %}>October</option>
+                    <option value="November" {% if current_month_name == 'November' %}selected{% endif %}>November</option>
+                    <option value="December" {% if current_month_name == 'December' %}selected{% endif %}>December</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label for="days-filter">Quick Filter:</label>
                 <select id="days-filter" class="filter-select">
+                    <option value="">Custom (Use Year/Month)</option>
                     <option value="7">Last 7 Days</option>
                     <option value="30" selected>Last 30 Days</option>
                     <option value="90">Last 90 Days</option>
@@ -95,8 +125,11 @@
         <h4>Top Spending Categories (Plaid Enhanced)</h4>
         <div class="categories-grid">
             {% for category in transactions_data.summary.top_primary_categories %}
-                <div class="category-card primary">
-                    <div class="category-name">{{ category.category }}</div>
+                {% set category_style = get_category_style(category.category) %}
+                <div class="category-card primary" style="border-left: 4px solid {{ category_style.color }};">
+                    <div class="category-name" style="color: {{ category_style.color }};">
+                        {{ category_style.emoji }} {{ category.category }}
+                    </div>
                     <div class="category-amount">${{ "{:,.2f}".format(category.total_amount) }}</div>
                     <div class="category-count">{{ category.transaction_count }} transactions</div>
                 </div>
@@ -106,8 +139,11 @@
         <h4>Top Spending Categories</h4>
         <div class="categories-grid">
             {% for category in transactions_data.summary.top_categories %}
-                <div class="category-card">
-                    <div class="category-name">{{ category.category }}</div>
+                {% set category_style = get_category_style(category.category) %}
+                <div class="category-card" style="border-left: 4px solid {{ category_style.color }};">
+                    <div class="category-name" style="color: {{ category_style.color }};">
+                        {{ category_style.emoji }} {{ category.category }}
+                    </div>
                     <div class="category-amount">${{ "{:,.2f}".format(category.total_amount) }}</div>
                     <div class="category-count">{{ category.transaction_count }} transactions</div>
                 </div>
@@ -154,13 +190,10 @@
                             </span>
                             <div class="category-tags">
                                 {% if transaction.category_primary and transaction.category_primary != 'OTHER' %}
-                                    <span class="category-tag primary">{{ transaction.category_primary }}</span>
-                                {% endif %}
-                                {% if transaction.category_detailed and transaction.category_detailed != 'OTHER' %}
-                                    <span class="category-tag detailed">{{ transaction.category_detailed }}</span>
-                                {% endif %}
-                                {% if transaction.category %}
-                                    <span class="category-tag legacy">{{ transaction.category }}</span>
+                                    {% set primary_style = get_category_style(transaction.category_primary) %}
+                                    <span class="category-tag primary" style="background-color: {{ primary_style.color }}; color: white;">
+                                        {{ primary_style.emoji }} {{ transaction.category_primary }}
+                                    </span>
                                 {% endif %}
                             </div>
                         </div>
@@ -185,6 +218,8 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const accountTypeFilter = document.getElementById('account-type-filter');
+    const yearFilter = document.getElementById('year-filter');
+    const monthFilter = document.getElementById('month-filter');
     const daysFilter = document.getElementById('days-filter');
     const refreshBtn = document.getElementById('refresh-btn');
     const loadingIndicator = document.getElementById('loading-indicator');
@@ -206,14 +241,31 @@ document.addEventListener('DOMContentLoaded', function() {
         showLoading();
         
         const accountTypes = accountTypeFilter.value;
+        const year = yearFilter.value;
+        const month = monthFilter.value;
         const days = daysFilter.value;
         
-        let url = `/transactions?days=${days}`;
+        let url = `/transactions`;
+        let params = [];
+        
         if (accountTypes !== 'depository,credit') {
-            url += `&account_types=${accountTypes}`;
+            params.push(`account_types=${accountTypes}`);
+        }
+        if (year) {
+            params.push(`year=${year}`);
+        }
+        if (month) {
+            params.push(`month=${month}`);
+        }
+        if (days) {
+            params.push(`days=${days}`);
         }
         if (refresh) {
-            url += '&refresh=true';
+            params.push('refresh=true');
+        }
+        
+        if (params.length > 0) {
+            url += '?' + params.join('&');
         }
         
         fetch(url)
@@ -282,6 +334,62 @@ document.addEventListener('DOMContentLoaded', function() {
         transactionSummary.innerHTML = summaryHtml;
     }
     
+    function getCategoryStyle(category) {
+        if (!category) return {color: '#6c757d', emoji: '📋'};
+        
+        const categoryStyles = {
+            'FOOD_AND_DRINK': {color: '#ff6b6b', emoji: '🍽️'},
+            'GENERAL_MERCHANDISE': {color: '#4ecdc4', emoji: '🛍️'},
+            'GROCERIES': {color: '#45b7d1', emoji: '🛒'},
+            'RESTAURANTS': {color: '#ff9f43', emoji: '🍕'},
+            'TRANSPORTATION': {color: '#5f27cd', emoji: '🚗'},
+            'GAS': {color: '#00d2d3', emoji: '⛽'},
+            'PARKING': {color: '#ff6348', emoji: '🅿️'},
+            'PUBLIC_TRANSPORTATION': {color: '#3742fa', emoji: '🚌'},
+            'TAXI': {color: '#ffa502', emoji: '🚕'},
+            'ENTERTAINMENT': {color: '#e056fd', emoji: '🎬'},
+            'RECREATION': {color: '#ff3838', emoji: '🎮'},
+            'STREAMING': {color: '#8c7ae6', emoji: '📺'},
+            'MUSIC': {color: '#ff6b9d', emoji: '🎵'},
+            'RETAIL': {color: '#6c5ce7', emoji: '🛒'},
+            'CLOTHING': {color: '#fd79a8', emoji: '👕'},
+            'ELECTRONICS': {color: '#0984e3', emoji: '💻'},
+            'HOME_IMPROVEMENT': {color: '#d63031', emoji: '🔨'},
+            'SPORTING_GOODS': {color: '#00b894', emoji: '⚽'},
+            'HEALTHCARE': {color: '#55a3ff', emoji: '🏥'},
+            'MEDICAL': {color: '#ff6b6b', emoji: '💊'},
+            'DENTAL': {color: '#74b9ff', emoji: '🦷'},
+            'VETERINARY': {color: '#fdcb6e', emoji: '🐕'},
+            'UTILITIES': {color: '#00cec9', emoji: '💡'},
+            'INTERNET': {color: '#6c5ce7', emoji: '📡'},
+            'MOBILE_PHONE': {color: '#fd79a8', emoji: '📱'},
+            'CABLE': {color: '#fdcb6e', emoji: '📺'},
+            'LOAN_PAYMENTS': {color: '#e17055', emoji: '💳'},
+            'CREDIT_CARD_PAYMENT': {color: '#a29bfe', emoji: '💳'},
+            'BANK_FEES': {color: '#636e72', emoji: '🏦'},
+            'ATM_FEES': {color: '#b2bec3', emoji: '🏧'},
+            'PAYROLL': {color: '#00b894', emoji: '💰'},
+            'DEPOSIT': {color: '#55a3ff', emoji: '💵'},
+            'TRANSFER_IN': {color: '#6c5ce7', emoji: '📈'},
+            'REFUND': {color: '#00cec9', emoji: '↩️'},
+            'TRAVEL': {color: '#ff7675', emoji: '✈️'},
+            'HOTEL': {color: '#fd79a8', emoji: '🏨'},
+            'FLIGHTS': {color: '#74b9ff', emoji: '✈️'},
+            'CAR_RENTAL': {color: '#fdcb6e', emoji: '🚗'},
+            'PERSONAL_CARE': {color: '#e84393', emoji: '💄'},
+            'BEAUTY': {color: '#fd79a8', emoji: '💅'},
+            'HAIR': {color: '#ff6b9d', emoji: '💇'},
+            'EDUCATION': {color: '#0984e3', emoji: '📚'},
+            'STUDENT_LOAN': {color: '#74b9ff', emoji: '🎓'},
+            'TUITION': {color: '#6c5ce7', emoji: '🏫'},
+            'OTHER': {color: '#6c757d', emoji: '📋'},
+            'GENERAL': {color: '#6c757d', emoji: '📋'},
+            'MISC': {color: '#6c757d', emoji: '📋'}
+        };
+        
+        return categoryStyles[category.toUpperCase()] || {color: '#6c757d', emoji: '📋'};
+    }
+    
     function updateCategories(summary) {
         if (!summary) {
             topCategories.innerHTML = '<p>No category data available.</p>';
@@ -294,26 +402,36 @@ document.addEventListener('DOMContentLoaded', function() {
             categoriesHtml = `
                 <h4>Top Spending Categories (Plaid Enhanced)</h4>
                 <div class="categories-grid">
-                    ${summary.top_primary_categories.map(cat => `
-                        <div class="category-card primary">
-                            <div class="category-name">${cat.category}</div>
-                            <div class="category-amount">$${cat.total_amount.toLocaleString('en-US', {minimumFractionDigits: 2})}</div>
-                            <div class="category-count">${cat.transaction_count} transactions</div>
-                        </div>
-                    `).join('')}
+                    ${summary.top_primary_categories.map(cat => {
+                        const style = getCategoryStyle(cat.category);
+                        return `
+                            <div class="category-card primary" style="border-left: 4px solid ${style.color};">
+                                <div class="category-name" style="color: ${style.color};">
+                                    ${style.emoji} ${cat.category}
+                                </div>
+                                <div class="category-amount">$${cat.total_amount.toLocaleString('en-US', {minimumFractionDigits: 2})}</div>
+                                <div class="category-count">${cat.transaction_count} transactions</div>
+                            </div>
+                        `;
+                    }).join('')}
                 </div>
             `;
         } else if (summary.top_categories && summary.top_categories.length > 0) {
             categoriesHtml = `
                 <h4>Top Spending Categories</h4>
                 <div class="categories-grid">
-                    ${summary.top_categories.map(cat => `
-                        <div class="category-card">
-                            <div class="category-name">${cat.category}</div>
-                            <div class="category-amount">$${cat.total_amount.toLocaleString('en-US', {minimumFractionDigits: 2})}</div>
-                            <div class="category-count">${cat.transaction_count} transactions</div>
-                        </div>
-                    `).join('')}
+                    ${summary.top_categories.map(cat => {
+                        const style = getCategoryStyle(cat.category);
+                        return `
+                            <div class="category-card" style="border-left: 4px solid ${style.color};">
+                                <div class="category-name" style="color: ${style.color};">
+                                    ${style.emoji} ${cat.category}
+                                </div>
+                                <div class="category-amount">$${cat.total_amount.toLocaleString('en-US', {minimumFractionDigits: 2})}</div>
+                                <div class="category-count">${cat.transaction_count} transactions</div>
+                            </div>
+                        `;
+                    }).join('')}
                 </div>
             `;
         } else {
@@ -346,13 +464,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Build category tags
                 let categoryTags = '<div class="category-tags">';
                 if (transaction.category_primary && transaction.category_primary !== 'OTHER') {
-                    categoryTags += `<span class="category-tag primary">${transaction.category_primary}</span>`;
+                    const primaryStyle = getCategoryStyle(transaction.category_primary);
+                    categoryTags += `<span class="category-tag primary" style="background-color: ${primaryStyle.color}; color: white;">${primaryStyle.emoji} ${transaction.category_primary}</span>`;
                 }
                 if (transaction.category_detailed && transaction.category_detailed !== 'OTHER') {
-                    categoryTags += `<span class="category-tag detailed">${transaction.category_detailed}</span>`;
+                    const detailedStyle = getCategoryStyle(transaction.category_detailed);
+                    categoryTags += `<span class="category-tag detailed" style="background-color: ${detailedStyle.color}; color: white;">${detailedStyle.emoji} ${transaction.category_detailed}</span>`;
                 }
                 if (transaction.category) {
-                    categoryTags += `<span class="category-tag legacy">${transaction.category}</span>`;
+                    const legacyStyle = getCategoryStyle(transaction.category);
+                    categoryTags += `<span class="category-tag legacy" style="background-color: ${legacyStyle.color}; color: white;">${legacyStyle.emoji} ${transaction.category}</span>`;
                 }
                 categoryTags += '</div>';
                 
@@ -397,7 +518,28 @@ document.addEventListener('DOMContentLoaded', function() {
         updateTransactions(false);
     });
     
+    yearFilter.addEventListener('change', function() {
+        // Clear days filter when year is changed
+        if (yearFilter.value !== '') {
+            daysFilter.value = '';
+        }
+        updateTransactions(false);
+    });
+    
+    monthFilter.addEventListener('change', function() {
+        // Clear days filter when month is changed
+        if (monthFilter.value !== '') {
+            daysFilter.value = '';
+        }
+        updateTransactions(false);
+    });
+    
     daysFilter.addEventListener('change', function() {
+        // Clear year/month filters when days is changed
+        if (daysFilter.value !== '') {
+            yearFilter.value = '';
+            monthFilter.value = '';
+        }
         updateTransactions(false);
     });
     

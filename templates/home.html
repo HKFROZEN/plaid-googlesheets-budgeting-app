@@ -176,7 +176,29 @@
                         {% for account in accounts_data.accounts %}
                             <div class="account-card {{ account.account_classification|default('') }}">
                                 <div class="account-header">
-                                    <h4>{{ account.name }}</h4>
+                                    <div class="account-name-container">
+                                        <h4 class="account-name-display" data-account-id="{{ account.account_id }}">
+                                            {{ account.display_name or account.name }}
+                                            {% if account.custom_name and account.custom_name != account.name %}
+                                                <span class="custom-name-indicator">(custom)</span>
+                                            {% endif %}
+                                        </h4>
+                                        <button class="btn-edit-name" data-account-id="{{ account.account_id }}" 
+                                                data-current-name="{{ account.custom_name or '' }}" 
+                                                data-original-name="{{ account.name }}"
+                                                title="Edit account name">
+                                            ✏️
+                                        </button>
+                                        <input type="text" class="account-name-input" 
+                                               data-account-id="{{ account.account_id }}"
+                                               value="{{ account.custom_name or '' }}"
+                                               placeholder="{{ account.name }}"
+                                               style="display: none;">
+                                        <div class="account-name-actions" style="display: none;">
+                                            <button class="btn-save-name" data-account-id="{{ account.account_id }}">💾</button>
+                                            <button class="btn-cancel-name" data-account-id="{{ account.account_id }}">❌</button>
+                                        </div>
+                                    </div>
                                     <div class="account-meta-header">
                                         <span class="account-type">{{ account.type | title }} - {{ account.subtype | title }}</span>
                                         <span class="institution-badge">{{ account.institution_name }}</span>
@@ -278,5 +300,253 @@
         </div>
     </div>
 {% endif %}
+
+<style>
+.account-name-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.account-name-display {
+    margin: 0;
+    flex: 1;
+    min-width: 0;
+}
+
+.btn-edit-name {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    font-size: 14px;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+}
+
+.btn-edit-name:hover {
+    opacity: 1;
+    background-color: rgba(0, 0, 0, 0.1);
+}
+
+.account-name-input {
+    flex: 1;
+    padding: 8px;
+    border: 2px solid #007bff;
+    border-radius: 4px;
+    font-size: 16px;
+    font-weight: bold;
+    background-color: white;
+    min-width: 200px;
+}
+
+.account-name-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.btn-save-name, .btn-cancel-name {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 14px;
+    transition: background-color 0.2s;
+}
+
+.btn-save-name:hover {
+    background-color: #d4edda;
+}
+
+.btn-cancel-name:hover {
+    background-color: #f8d7da;
+}
+
+.account-name-editing {
+    background-color: #f8f9fa;
+    border: 1px solid #007bff;
+    border-radius: 4px;
+    padding: 8px;
+}
+
+.custom-name-indicator {
+    font-size: 12px;
+    color: #6c757d;
+    font-weight: normal;
+    margin-left: 8px;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Handle edit button clicks
+    document.querySelectorAll('.btn-edit-name').forEach(button => {
+        button.addEventListener('click', function() {
+            const accountId = this.getAttribute('data-account-id');
+            enterEditMode(accountId);
+        });
+    });
+
+    // Handle save button clicks
+    document.querySelectorAll('.btn-save-name').forEach(button => {
+        button.addEventListener('click', function() {
+            const accountId = this.getAttribute('data-account-id');
+            saveAccountName(accountId);
+        });
+    });
+
+    // Handle cancel button clicks
+    document.querySelectorAll('.btn-cancel-name').forEach(button => {
+        button.addEventListener('click', function() {
+            const accountId = this.getAttribute('data-account-id');
+            exitEditMode(accountId);
+        });
+    });
+
+    // Handle Enter key to save
+    document.querySelectorAll('.account-name-input').forEach(input => {
+        input.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                const accountId = this.getAttribute('data-account-id');
+                saveAccountName(accountId);
+            }
+        });
+    });
+
+    // Handle Escape key to cancel
+    document.querySelectorAll('.account-name-input').forEach(input => {
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                const accountId = this.getAttribute('data-account-id');
+                exitEditMode(accountId);
+            }
+        });
+    });
+
+    function enterEditMode(accountId) {
+        const displayElement = document.querySelector(`.account-name-display[data-account-id="${accountId}"]`);
+        const editButton = document.querySelector(`.btn-edit-name[data-account-id="${accountId}"]`);
+        const inputElement = document.querySelector(`.account-name-input[data-account-id="${accountId}"]`);
+        const actionsElement = document.querySelector(`.account-name-actions[data-account-id="${accountId}"]`);
+        const cardElement = displayElement.closest('.account-card');
+
+        // Hide display elements
+        displayElement.style.display = 'none';
+        editButton.style.display = 'none';
+
+        // Show edit elements
+        inputElement.style.display = 'block';
+        actionsElement.style.display = 'flex';
+        cardElement.classList.add('account-name-editing');
+
+        // Focus the input
+        inputElement.focus();
+        inputElement.select();
+    }
+
+    function exitEditMode(accountId) {
+        const displayElement = document.querySelector(`.account-name-display[data-account-id="${accountId}"]`);
+        const editButton = document.querySelector(`.btn-edit-name[data-account-id="${accountId}"]`);
+        const inputElement = document.querySelector(`.account-name-input[data-account-id="${accountId}"]`);
+        const actionsElement = document.querySelector(`.account-name-actions[data-account-id="${accountId}"]`);
+        const cardElement = displayElement.closest('.account-card');
+
+        // Reset input to original value
+        const originalValue = editButton.getAttribute('data-current-name');
+        inputElement.value = originalValue;
+
+        // Show display elements
+        displayElement.style.display = 'block';
+        editButton.style.display = 'block';
+
+        // Hide edit elements
+        inputElement.style.display = 'none';
+        actionsElement.style.display = 'none';
+        cardElement.classList.remove('account-name-editing');
+    }
+
+    function saveAccountName(accountId) {
+        const inputElement = document.querySelector(`.account-name-input[data-account-id="${accountId}"]`);
+        const displayElement = document.querySelector(`.account-name-display[data-account-id="${accountId}"]`);
+        const editButton = document.querySelector(`.btn-edit-name[data-account-id="${accountId}"]`);
+        const originalName = editButton.getAttribute('data-original-name');
+        
+        const newName = inputElement.value.trim();
+        
+        // Make API call to update the name
+        fetch('/update_account_name', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                account_id: accountId,
+                custom_name: newName || null
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Update display
+                const displayName = newName || originalName;
+                displayElement.textContent = displayName;
+                
+                // Update button data
+                editButton.setAttribute('data-current-name', newName);
+                
+                // Add indicator if custom name is set
+                if (newName && newName !== originalName) {
+                    if (!displayElement.querySelector('.custom-name-indicator')) {
+                        const indicator = document.createElement('span');
+                        indicator.className = 'custom-name-indicator';
+                        indicator.textContent = '(custom)';
+                        displayElement.appendChild(indicator);
+                    }
+                } else {
+                    // Remove indicator if reverting to original name
+                    const indicator = displayElement.querySelector('.custom-name-indicator');
+                    if (indicator) {
+                        indicator.remove();
+                    }
+                }
+                
+                exitEditMode(accountId);
+                
+                // Show success message
+                showMessage('Account name updated successfully!', 'success');
+            } else {
+                showMessage('Failed to update account name: ' + data.error, 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Error updating account name:', error);
+            showMessage('Error updating account name', 'error');
+        });
+    }
+
+    function showMessage(message, type) {
+        // Create or update a temporary message element
+        let messageElement = document.querySelector('.temp-message');
+        if (!messageElement) {
+            messageElement = document.createElement('div');
+            messageElement.className = 'temp-message alert';
+            document.querySelector('.user-info').appendChild(messageElement);
+        }
+        
+        messageElement.className = `temp-message alert alert-${type}`;
+        messageElement.textContent = message;
+        
+        // Remove after 3 seconds
+        setTimeout(() => {
+            if (messageElement.parentNode) {
+                messageElement.parentNode.removeChild(messageElement);
+            }
+        }, 3000);
+    }
+});
+</script>
 
 {% endblock %} 

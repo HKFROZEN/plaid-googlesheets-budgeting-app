@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     iso_currency_code VARCHAR(3) DEFAULT 'USD',
     unofficial_currency_code VARCHAR(10),
     account_classification VARCHAR(20) NOT NULL CHECK (account_classification IN ('asset', 'liability')),
+    custom_name VARCHAR(255),
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -83,6 +84,7 @@ CREATE INDEX IF NOT EXISTS idx_tokens_user_id ON user_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_accounts_user_id ON accounts(user_id);
 CREATE INDEX IF NOT EXISTS idx_accounts_token_id ON accounts(token_id);
 CREATE INDEX IF NOT EXISTS idx_accounts_account_id ON accounts(account_id);
+CREATE INDEX IF NOT EXISTS idx_accounts_custom_name ON accounts(custom_name);
 CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions(user_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_account_id ON transactions(account_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);

@@ -15,12 +15,24 @@ app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
 plaid_service = None
 db = None
 
+def month_name_to_number(month_name):
+    """Convert month name to month number"""
+    if not month_name:
+        return None
+    
+    month_mapping = {
+        'January': 1, 'February': 2, 'March': 3, 'April': 4,
+        'May': 5, 'June': 6, 'July': 7, 'August': 8,
+        'September': 9, 'October': 10, 'November': 11, 'December': 12
+    }
+    return month_mapping.get(month_name.strip().capitalize())
+
 def get_plaid_service():
     global plaid_service
     if plaid_service is None:
         client_id = os.getenv('PLAID_CLIENT_ID')
         secret = os.getenv('PLAID_SECRET')
-        environment = os.getenv('PLAID_ENV', 'sandbox')
+        environment = os.getenv('PLAID_ENVIRONMENT', 'sandbox')
         
         if not client_id or not secret:
             raise ValueError("Missing PLAID_CLIENT_ID or PLAID_SECRET environment variables")
@@ -263,7 +275,8 @@ def get_transactions():
         if year and year.strip():
             year_int = int(year)
         if month and month.strip():
-            month_int = int(month)
+            # Convert month name to number
+            month_int = month_name_to_number(month)
         
         # If no explicit year/month provided, but days is provided, use current date logic
         if year_int is None and month_int is None and days:
@@ -308,7 +321,8 @@ def get_checking_transactions():
         if year and year.strip():
             year_int = int(year)
         if month and month.strip():
-            month_int = int(month)
+            # Convert month name to number
+            month_int = month_name_to_number(month)
         
         # If no explicit year/month provided, but days is provided, use current date logic
         if year_int is None and month_int is None and days:
@@ -353,7 +367,8 @@ def get_credit_transactions():
         if year and year.strip():
             year_int = int(year)
         if month and month.strip():
-            month_int = int(month)
+            # Convert month name to number
+            month_int = month_name_to_number(month)
         
         # If no explicit year/month provided, but days is provided, use current date logic
         if year_int is None and month_int is None and days:
@@ -392,6 +407,22 @@ def transactions_page():
         # Get basic account info for filtering
         accounts_data = service.get_cached_accounts(user_id)
         
+        # Get current year and month for defaults
+        from datetime import datetime
+        current_date = datetime.now()
+        current_year = current_date.year
+        current_month = current_date.month
+        
+        # Generate year list (current year + 3 years back)
+        year_list = []
+        for i in range(4):  # 0, 1, 2, 3 = 4 years total
+            year_list.append(current_year - i)
+        
+        # Convert current month number to name
+        month_names = ['', 'January', 'February', 'March', 'April', 'May', 'June',
+                      'July', 'August', 'September', 'October', 'November', 'December']
+        current_month_name = month_names[current_month]
+        
         # Get cached transactions for initial display
         transactions_data = service.get_cached_transactions(user_id, ['depository', 'credit'])
         
@@ -399,7 +430,10 @@ def transactions_page():
                              user=user,
                              accounts_data=accounts_data,
                              transactions_data=transactions_data,
-                             environment=service.environment)
+                             environment=service.environment,
+                             current_year=current_year,
+                             current_month_name=current_month_name,
+                             year_list=year_list)
     except Exception as e:
         flash(f"Error loading transactions: {str(e)}", "error")
         return redirect(url_for('main'))

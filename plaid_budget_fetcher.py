@@ -58,7 +58,12 @@ class PlaidService:
         self.db = DatabaseManager()
         
         # Configure Plaid client
-        host = plaid.Environment.Sandbox
+        if self.environment == 'sandbox':
+            host = plaid.Environment.Sandbox
+        elif self.environment == 'production':
+            host = plaid.Environment.Production
+        else:
+            raise ValueError(f"Invalid environment: {self.environment}")
         self.configuration = plaid.Configuration(
             host=host,
             api_key={
@@ -346,7 +351,7 @@ class PlaidService:
                 response = self.client.accounts_get(request)
                 accounts = response.to_dict()['accounts']
                 
-                # Add institution info to each account
+                # Add institution info to each account and merge custom names
                 for account in accounts:
                     account['institution_name'] = institution_name
                     account['token_id'] = token_id
@@ -361,6 +366,20 @@ class PlaidService:
                             account['formatted_balance'] = "N/A"
                     else:
                         account['formatted_balance'] = "N/A"
+                
+                # Get cached accounts to preserve custom names
+                cached_accounts = self.db.get_cached_accounts(user_id)
+                custom_names = {acc['account_id']: acc['custom_name'] for acc in cached_accounts if acc['custom_name']}
+                
+                # Merge custom names with fresh account data
+                for account in accounts:
+                    account_id = account['account_id']
+                    if account_id in custom_names:
+                        account['custom_name'] = custom_names[account_id]
+                        account['display_name'] = custom_names[account_id]
+                    else:
+                        account['custom_name'] = None
+                        account['display_name'] = account['name']
                 
                 all_accounts.extend(accounts)
                 institutions.append({
@@ -636,62 +655,3 @@ class PlaidService:
         return [Products('transactions')]
 
 
-class PlaidBudgetFetcher:
-    """Class to fetch budget information from Plaid API"""
-    
-    def __init__(self, client_id: str, secret: str, access_token: str, environment: str = 'sandbox'):
-        """
-        Initialize the Plaid client
-        
-        Args:
-            client_id: Plaid client ID
-            secret: Plaid secret key
-            access_token: Plaid access token for the user
-            environment: Plaid environment (sandbox, development, production)
-        """
-        self.client_id = client_id
-        self.secret = secret
-        self.access_token = access_token
-        self.environment = environment
-        host = plaid.Environment.Sandbox
-        # Configure Plaid client
-        self.configuration = plaid.Configuration(
-            host=host,
-            api_key={
-                'clientId': self.client_id,
-                'secret': self.secret,
-                'plaidVersion': '2020-09-14'
-            }
-        )
-
-        api_client = plaid.ApiClient(self.configuration)
-        self.client = plaid_api.PlaidApi(api_client)
-
-        
-        
-    def get_products(self) -> List[Dict]:
-        products = []
-        PLAID_PRODUCTS = ['transactions']
-        for product in PLAID_PRODUCTS:
-            products.append(Products(product))
-            print(product)
-        return products
-
-    def get_access_token(self):
-        public_token = request.form['public_token']
-        try:
-            exchange_request = ItemPublicTokenExchangeRequest(
-                public_token=public_token)
-            exchange_response = self.client.item_public_token_exchange(exchange_request)
-            self.access_token = exchange_response['access_token']
-            self.item_id = exchange_response['item_id']
-            return jsonify(exchange_response.to_dict())
-        except plaid.ApiException as e:
-            return e.body
-            
-    def get_accounts(self) -> List[Dict]:
-        request = AccountsGetRequest(
-            access_token=self.access_token
-        )
-        response = self.client.accounts_get(request)
-        return response.to_dict()
