@@ -1,0 +1,230 @@
+# Cursor Project Rules - Plaid Google Sheets Budgeting App
+
+## Project Overview
+This is a Flask-based web application that integrates with Plaid API to fetch financial data and help users manage their budgets. The app allows users to connect their bank accounts, view transactions, and analyze spending patterns.
+
+## Tech Stack
+- **Backend**: Flask (Python 3.8+)
+- **Database**: SQLite with custom DatabaseManager class
+- **External APIs**: Plaid API for financial data
+- **Frontend**: HTML templates with Jinja2
+- **Authentication**: Session-based with custom decorators
+- **Environment**: Development/Sandbox/Production configurations
+
+## Project Structure
+
+### Core Files
+- `app.py`: Main Flask application with routes and authentication
+- `plaid_budget_fetcher.py`: Plaid API service layer and data processing
+- `database.py`: SQLite database management with user auth and token storage
+- `requirements.txt`: Python dependencies
+- `templates/`: HTML templates using Jinja2
+
+### Key Patterns
+
+#### Service Layer Pattern
+- `PlaidService` class handles all Plaid API interactions
+- `DatabaseManager` class manages SQLite operations
+- Services are initialized lazily with global functions `get_plaid_service()` and `get_db()`
+
+#### Authentication
+- Use `@login_required` decorator for protected routes
+- Session-based authentication with `session['user_id']`
+- Password hashing with salt using `hashlib` and `secrets`
+
+#### Error Handling
+- Use `flash()` for user-facing messages
+- Handle Plaid API errors gracefully with try/catch
+- Database operations use context managers for proper connection handling
+
+## Coding Standards
+
+### Python Code Style
+- Follow PEP 8 conventions
+- Use type hints where appropriate (`typing` module)
+- Use dataclasses for structured data (`@dataclass`)
+- Keep functions focused and single-responsibility
+
+### Database Operations
+- Always use parameterized queries to prevent SQL injection
+- Use context managers (`with` statements) for database connections
+- Handle database errors gracefully with try/catch
+- Use FOREIGN KEY constraints for data integrity
+
+### Plaid Integration
+- Use environment variables for API credentials
+- Implement proper error handling for API failures
+- Cache data when appropriate to minimize API calls
+- Handle different Plaid environments (sandbox/development/production)
+
+### Flask Best Practices
+- Use `@login_required` decorator for protected routes
+- Validate form data before processing
+- Use `flash()` for user feedback messages
+- Return proper HTTP status codes
+- Use `redirect()` and `url_for()` for navigation
+
+## Environment Configuration
+
+### Required Environment Variables
+```env
+SECRET_KEY=your-secret-key-here-change-in-production
+FLASK_ENV=development
+FLASK_DEBUG=1
+PLAID_CLIENT_ID=your-plaid-client-id
+PLAID_SECRET=your-plaid-secret-key
+PLAID_ENV=sandbox  # or development/production
+```
+
+### Development Setup
+1. Create virtual environment: `python -m venv venv`
+2. Activate: `venv\Scripts\activate` (Windows) or `source venv/bin/activate` (Mac/Linux)
+3. Install dependencies: `pip install -r requirements.txt`
+4. Create `.env` file with required variables
+5. Run: `python app.py`
+
+## Database Schema
+
+### Key Tables
+- `users`: User authentication (id, username, password_hash, salt)
+- `user_tokens`: Plaid access tokens (user_id, access_token, item_id, institution_info)
+- `accounts`: Cached account information
+- `transactions`: Cached transaction data
+
+### Database Patterns
+- Use AUTOINCREMENT for primary keys
+- Include created_at/updated_at timestamps
+- Use FOREIGN KEY constraints with CASCADE deletes
+- Use parameterized queries exclusively
+
+## Common Development Tasks
+
+### Adding New Routes
+1. Add route handler to `app.py`
+2. Use `@login_required` decorator for protected routes
+3. Follow existing error handling pattern
+4. Add corresponding HTML template if needed
+5. Use `flash()` for user feedback
+
+### Database Operations
+1. Add methods to `DatabaseManager` class in `database.py`
+2. Use parameterized queries to prevent SQL injection
+3. Handle database errors gracefully
+4. Use context managers for connection handling
+
+### Plaid API Integration
+1. Add methods to `PlaidService` class in `plaid_budget_fetcher.py`
+2. Implement proper error handling for API failures
+3. Consider caching for frequently accessed data
+4. Use environment variables for configuration
+
+### Frontend Development
+1. Extend `base.html` template for consistent layout
+2. Use Flask's `url_for()` for links
+3. Display flash messages in templates
+4. Follow existing HTML/CSS patterns
+
+## Security Considerations
+
+### Authentication
+- Never store plain-text passwords
+- Use secure session management
+- Implement proper logout functionality
+- Validate user input on all forms
+
+### API Security
+- Store API credentials in environment variables
+- Use HTTPS in production
+- Implement rate limiting if needed
+- Handle API errors without exposing sensitive information
+
+### Database Security
+- Use parameterized queries exclusively
+- Implement proper access controls
+- Regular security audits of database operations
+- Backup strategies for production data
+
+## Testing and Debugging
+
+### Development Testing
+- Use Plaid sandbox environment for testing
+- Test credentials: "user_good" / "pass_good"
+- Delete `plaid_app.db` to reset database during development
+- Use `FLASK_DEBUG=1` for detailed error messages
+
+### Common Issues
+- Missing environment variables: Check `.env` file
+- Plaid API errors: Verify credentials and environment settings
+- Database errors: Check SQL syntax and foreign key constraints
+- Session issues: Ensure proper session management
+
+## Performance Considerations
+
+### Caching Strategy
+- Cache account and transaction data to minimize API calls
+- Implement cache invalidation based on data freshness
+- Use database caching for frequently accessed data
+
+### Database Optimization
+- Use indexes on frequently queried columns
+- Implement pagination for large datasets
+- Regular maintenance of SQLite database
+
+## Deployment Guidelines
+
+### Production Checklist
+- Use production Plaid environment
+- Set strong `SECRET_KEY`
+- Configure proper database URL
+- Use HTTPS exclusively
+- Implement proper logging and monitoring
+- Use production WSGI server (Gunicorn)
+
+### Environment-Specific Configurations
+- Sandbox: Testing and development
+- Development: Live data testing
+- Production: Live application with real financial data
+
+## File Naming and Organization
+
+### Naming Conventions
+- Use snake_case for Python files and functions
+- Use descriptive names for classes and methods
+- Keep template names simple and descriptive
+- Use consistent naming for database tables and columns
+
+### Code Organization
+- Keep routes in `app.py` focused and clean
+- Put complex business logic in service classes
+- Use separate modules for different concerns
+- Keep templates organized by functionality
+
+## Documentation Standards
+
+### Code Documentation
+- Use docstrings for all classes and methods
+- Include type hints where appropriate
+- Document complex business logic
+- Keep README and DEVELOPMENT.md updated
+
+### Comments
+- Explain complex algorithms or business logic
+- Document API integration patterns
+- Explain database schema decisions
+- Keep comments concise and relevant
+
+## Version Control
+
+### Git Practices
+- Use meaningful commit messages
+- Keep commits focused and atomic
+- Use branches for feature development
+- Never commit sensitive data (.env files)
+
+### Ignored Files
+- `.env` files with credentials
+- `__pycache__/` directories
+- `plaid_app.db` database file
+- Virtual environment directories
+
+Remember: Always prioritize security, especially when handling financial data. Test thoroughly in sandbox environment before deploying to production. 
