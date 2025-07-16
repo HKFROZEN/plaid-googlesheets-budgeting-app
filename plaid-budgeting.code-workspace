@@ -1,0 +1,159 @@
+{
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "settings": {
+    "python.defaultInterpreterPath": "./venv/bin/python",
+    "python.terminal.activateEnvironment": true,
+    "python.analysis.typeCheckingMode": "basic",
+    "python.linting.enabled": true,
+    "python.linting.pylintEnabled": true,
+    "python.linting.flake8Enabled": true,
+    "python.formatting.provider": "black",
+    "python.formatting.blackArgs": ["--line-length", "88"],
+    
+    "files.exclude": {
+      "**/__pycache__": true,
+      "**/*.pyc": true,
+      "**/*.pyo": true,
+      "**/*.db": true,
+      "**/.venv": true,
+      "**/venv": true,
+      "**/.env": true
+    },
+    
+    "files.watcherExclude": {
+      "**/__pycache__/**": true,
+      "**/*.pyc": true,
+      "**/venv/**": true,
+      "**/.venv/**": true,
+      "**/*.db": true
+    },
+    
+    "search.exclude": {
+      "**/__pycache__": true,
+      "**/venv": true,
+      "**/.venv": true,
+      "**/*.db": true
+    },
+    
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": true
+    },
+    
+    "html.format.indentInnerHtml": true,
+    "html.format.wrapLineLength": 100,
+    
+    "emmet.includeLanguages": {
+      "jinja-html": "html"
+    },
+    
+    "files.associations": {
+      "*.html": "jinja-html"
+    }
+  },
+  "extensions": {
+    "recommendations": [
+      "ms-python.python",
+      "ms-python.flake8",
+      "ms-python.black-formatter",
+      "ms-python.pylint",
+      "ms-vscode.vscode-json",
+      "bradlc.vscode-tailwindcss",
+      "formulahendry.auto-rename-tag",
+      "ms-vscode.vscode-html-css-support"
+    ]
+  },
+  "launch": {
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Flask App",
+        "type": "python",
+        "request": "launch",
+        "program": "${workspaceFolder}/app.py",
+        "console": "integratedTerminal",
+        "env": {
+          "FLASK_ENV": "development",
+          "FLASK_DEBUG": "1"
+        },
+        "args": [],
+        "cwd": "${workspaceFolder}"
+      },
+      {
+        "name": "Flask App (Production)",
+        "type": "python",
+        "request": "launch",
+        "program": "${workspaceFolder}/app.py",
+        "console": "integratedTerminal",
+        "env": {
+          "FLASK_ENV": "production",
+          "FLASK_DEBUG": "0"
+        },
+        "args": [],
+        "cwd": "${workspaceFolder}"
+      }
+    ]
+  },
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "Install Dependencies",
+        "type": "shell",
+        "command": "pip",
+        "args": ["install", "-r", "requirements.txt"],
+        "group": "build",
+        "presentation": {
+          "echo": true,
+          "reveal": "always",
+          "focus": false,
+          "panel": "shared"
+        }
+      },
+      {
+        "label": "Run Flask App",
+        "type": "shell",
+        "command": "python",
+        "args": ["app.py"],
+        "group": "build",
+        "presentation": {
+          "echo": true,
+          "reveal": "always",
+          "focus": false,
+          "panel": "shared"
+        },
+        "dependsOn": ["Install Dependencies"]
+      },
+      {
+        "label": "Format Code",
+        "type": "shell",
+        "command": "black",
+        "args": [".", "--line-length", "88"],
+        "group": "build",
+        "presentation": {
+          "echo": true,
+          "reveal": "always",
+          "focus": false,
+          "panel": "shared"
+        }
+      },
+      {
+        "label": "Lint Code",
+        "type": "shell",
+        "command": "flake8",
+        "args": ["."],
+        "group": "test",
+        "presentation": {
+          "echo": true,
+          "reveal": "always",
+          "focus": false,
+          "panel": "shared"
+        }
+      }
+    ]
+  }
+} 

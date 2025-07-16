@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% if is_additional_account %}
+    <h1>Add Another Bank Account</h1>
+    <p>You currently have {{ institutions_count }} connected institution{{ "s" if institutions_count != 1 else "" }}. Add another bank account to view all your financial information in one place.</p>
+{% else %}
+    <h1>Connect Your Bank Account</h1>
+    <p>Use Plaid Link to securely connect your bank account and generate a public token.</p>
+{% endif %}
+
+<div class="link-container">
+    <button id="link-button" class="btn-primary">
+        {% if is_additional_account %}
+            Add Another Account
+        {% else %}
+            Connect Bank Account
+        {% endif %}
+    </button>
+    <div id="link-result" class="result-container" style="display: none;"></div>
+</div>
+
+<hr>
+
+<div class="token-info">
+    <h3>How it works:</h3>
+    <ol>
+        <li>Click "{% if is_additional_account %}Add Another Account{% else %}Connect Bank Account{% endif %}" to launch Plaid Link</li>
+        <li>Select your bank and enter your credentials</li>
+        <li>{% if is_additional_account %}Your new account will be automatically connected and ready to use{% else %}Your account will be automatically connected and ready to use{% endif %}</li>
+        <li>{% if is_additional_account %}View your expanded account list on the main page{% else %}Access your account information on the main page{% endif %}</li>
+    </ol>
+    <p><strong>Note:</strong> The setup process is now fully automated - no manual token exchange required!</p>
+</div>
+
+<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+<script>
+(function() {
+    const isAdditionalAccount = "{{ is_additional_account or 'false' }}" === "True";
+    
+    // First, get a link token from the server
+    fetch('/create_link_token', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            throw new Error(data.error);
+        }
+        
+        // Configuration from server
+        const config = {
+            token: data.link_token,
+            onSuccess: function(public_token, metadata) {
+                // Display the public token
+                document.getElementById('link-result').style.display = 'block';
+                
+                if (isAdditionalAccount) {
+                    document.getElementById('link-result').innerHTML = `
+                        <div class="alert alert-success">
+                            <h4>✅ Account Connected Successfully!</h4>
+                            <p><strong>Institution:</strong> ${metadata.institution.name}</p>
+                            <p><strong>Accounts:</strong> ${metadata.accounts.length} account(s) connected</p>
+                            <p><strong>Status:</strong> Access token obtained automatically</p>
+                            <p><a href="/" class="btn-primary">View Your Accounts</a></p>
+                        </div>
+                    `;
+                } else {
+                    document.getElementById('link-result').innerHTML = `
+                        <div class="alert alert-success">
+                            <h4>✅ Account Connected Successfully!</h4>
+                            <p><strong>Institution:</strong> ${metadata.institution.name}</p>
+                            <p><strong>Accounts:</strong> ${metadata.accounts.length} account(s) connected</p>
+                            <p><strong>Status:</strong> Access token obtained automatically</p>
+                            <p><a href="/" class="btn-primary">View Your Accounts</a></p>
+                        </div>
+                    `;
+                }
+                
+                // Send the public token to the backend for automatic exchange
+                fetch('/store_public_token', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        public_token: public_token,
+                        metadata: metadata
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Update the display to show successful exchange
+                        document.getElementById('link-result').innerHTML = `
+                            <div class="alert alert-success">
+                                <h4>✅ Account Connected Successfully!</h4>
+                                <p><strong>Institution:</strong> ${data.institution_name}</p>
+                                <p><strong>Accounts:</strong> ${data.accounts_count} account(s) connected</p>
+                                <p><strong>Status:</strong> Ready to use - access token obtained automatically</p>
+                                <div class="success-actions">
+                                    <a href="/" class="btn-primary">View Your Accounts</a>
+                                    ${isAdditionalAccount ? '<a href="/add_account" class="btn-secondary">Add Another Account</a>' : ''}
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        // Show error from backend
+                        document.getElementById('link-result').innerHTML = `
+                            <div class="alert alert-error">
+                                <h4>❌ Connection Failed</h4>
+                                <p><strong>Error:</strong> ${data.error || 'Unknown error occurred'}</p>
+                                <p>The account was connected to Plaid but we couldn't complete the setup.</p>
+                                <div class="error-actions">
+                                    <a href="/" class="btn-primary">Try Again</a>
+                                </div>
+                            </div>
+                        `;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error during token exchange:', error);
+                    document.getElementById('link-result').innerHTML = `
+                        <div class="alert alert-error">
+                            <h4>❌ Connection Failed</h4>
+                            <p><strong>Error:</strong> Failed to complete account setup</p>
+                            <p>The account was connected to Plaid but we couldn't complete the setup.</p>
+                            <div class="error-actions">
+                                <a href="/" class="btn-primary">Try Again</a>
+                            </div>
+                        </div>
+                    `;
+                });
+            },
+            onExit: function(err, metadata) {
+                if (err != null) {
+                    console.error('Plaid Link error:', err);
+                    document.getElementById('link-result').style.display = 'block';
+                    document.getElementById('link-result').innerHTML = `
+                        <div class="alert alert-error">
+                            <h4>Error:</h4>
+                            <p>${err.display_message || 'An error occurred during bank connection.'}</p>
+                        </div>
+                    `;
+                }
+            }
+        };
+
+        // Initialize Plaid Link
+        const linkHandler = Plaid.create(config);
+        
+        // Handle button click
+        document.getElementById('link-button').addEventListener('click', function() {
+            linkHandler.open();
+        });
+    })
+    .catch(error => {
+        console.error('Error getting link token:', error);
+        document.getElementById('link-result').style.display = 'block';
+        document.getElementById('link-result').innerHTML = `
+            <div class="alert alert-error">
+                <h4>Error:</h4>
+                <p>Failed to initialize Plaid Link: ${error.message}</p>
+            </div>
+        `;
+    });
+})();
+
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(function() {
+        // Show copied feedback
+        event.target.textContent = 'Copied!';
+        setTimeout(function() {
+            event.target.textContent = 'Copy';
+        }, 2000);
+    });
+}
+</script>
+{% endblock %} 

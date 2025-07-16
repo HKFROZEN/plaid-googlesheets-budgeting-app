@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="user-info">
+    <h3>Welcome, {{ user.username }}!</h3>
+    <p><strong>User ID:</strong> {{ user.id }}</p>
+    <div class="user-actions">
+        <a href="{{ url_for('logout') }}" class="btn-secondary">Logout</a>
+    </div>
+</div>
+
+<h1>Plaid Flask App</h1>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+            <div class="alert alert-{{ category }}">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
+{% endwith %}
+
+{% if error %}
+    <div class="info-item">
+        <strong>Status:</strong> <span class="status-error">❌ Service initialization failed</span>
+    </div>
+    <div class="info-item">
+        <strong>Error:</strong> {{ error }}
+    </div>
+    <p>Please check your environment variables (PLAID_CLIENT_ID, PLAID_SECRET)</p>
+{% else %}
+    <div class="info-item">
+        <strong>Status:</strong> 
+        {% if has_token %}
+            <span class="status-success">✅ Access token is available</span>
+        {% else %}
+            <span class="status-error">❌ No access token available</span>
+        {% endif %}
+    </div>
+    
+    <div class="info-item">
+        <strong>Environment:</strong> {{ environment }}
+    </div>
+    
+    {% if token_info %}
+        <div class="institution-info">
+            {% if token_info.institution_name %}
+                <div class="info-item">
+                    <strong>Connected Institution:</strong> {{ token_info.institution_name }}
+                </div>
+            {% endif %}
+            
+            {% if token_info.item_id %}
+                <div class="info-item">
+                    <strong>Item ID:</strong> {{ token_info.item_id }}
+                </div>
+            {% endif %}
+            
+            {% if token_info.updated_at %}
+                <div class="info-item">
+                    <strong>Last Updated:</strong> {{ token_info.updated_at }}
+                </div>
+            {% endif %}
+        </div>
+    {% endif %}
+    
+    <hr>
+    
+    {% if has_token %}
+        <!-- Account Information Section -->
+        <div class="accounts-section">
+            <div class="accounts-title-bar">
+                <h3>Account Information</h3>
+                <a href="{{ url_for('add_account') }}" class="btn-add-account">+ Add Account</a>
+            </div>
+            
+            {% if accounts_error %}
+                <div class="alert alert-error">
+                    <strong>⚠️ Unable to fetch account information:</strong> {{ accounts_error }}
+                </div>
+                <p>Please check your token status or try reconnecting your account.</p>
+            {% elif accounts_data and accounts_data.accounts %}
+                <div class="accounts-header">
+                    <div class="accounts-count">
+                        <span class="account-count-badge">{{ accounts_data.total_accounts }}</span>
+                        <span class="account-count-text">Account{{ "s" if accounts_data.total_accounts != 1 else "" }} from {{ institutions_count }} Institution{{ "s" if institutions_count != 1 else "" }}</span>
+                        {% if is_cached %}
+                            <span class="cache-status">📋 Cached Data</span>
+                        {% else %}
+                            <span class="cache-status">🔄 Fresh Data</span>
+                        {% endif %}
+                    </div>
+                    <div class="accounts-actions">
+                        {% if is_cached %}
+                            <a href="{{ url_for('main', refresh='true') }}" class="btn-refresh-api" title="Refresh from bank APIs">
+                                🔄 Refresh from Banks
+                            </a>
+                        {% else %}
+                            <a href="{{ url_for('main') }}" class="btn-refresh" title="Refresh account data">
+                                🔄 Refresh
+                            </a>
+                        {% endif %}
+                        {% if accounts_data.total_accounts > 3 %}
+                            <div class="scroll-hint">
+                                <small>↓ Scroll to see more accounts ↓</small>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <!-- Account Summary -->
+                {% if account_summary %}
+                    <div class="account-summary-section">
+                        <h4>Financial Summary</h4>
+                        <div class="summary-cards">
+                            {% if account_summary.by_classification.asset %}
+                                <div class="summary-card asset">
+                                    <div class="summary-header">
+                                        <h5>💰 Assets</h5>
+                                        <span class="account-count">{{ account_summary.by_classification.asset.count }} accounts</span>
+                                    </div>
+                                    <div class="summary-amount positive">
+                                        ${{ "{:,.2f}".format(account_summary.by_classification.asset.total_balance) }}
+                                    </div>
+                                </div>
+                            {% endif %}
+                            
+                            {% if account_summary.by_classification.liability %}
+                                <div class="summary-card liability">
+                                    <div class="summary-header">
+                                        <h5>💳 Liabilities</h5>
+                                        <span class="account-count">{{ account_summary.by_classification.liability.count }} accounts</span>
+                                    </div>
+                                    <div class="summary-amount negative">
+                                        ${{ "{:,.2f}".format(account_summary.by_classification.liability.total_balance) }}
+                                    </div>
+                                </div>
+                            {% endif %}
+                            
+                            <div class="summary-card net-worth">
+                                <div class="summary-header">
+                                    <h5>📈 Net Worth</h5>
+                                    <span class="account-count">Total</span>
+                                </div>
+                                <div class="summary-amount {{ 'positive' if account_summary.net_worth >= 0 else 'negative' }}">
+                                    ${{ "{:,.2f}".format(account_summary.net_worth) }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                {% endif %}
+                
+                <!-- Institution Summary -->
+                {% if accounts_data.institutions and accounts_data.institutions|length > 1 %}
+                    <div class="institutions-summary">
+                        <h4>Connected Institutions</h4>
+                        <div class="institutions-grid">
+                            {% for institution in accounts_data.institutions %}
+                                <div class="institution-card">
+                                    <div class="institution-info">
+                                        <strong>{{ institution.name }}</strong>
+                                        <span class="institution-accounts">{{ institution.account_count }} account{{ "s" if institution.account_count != 1 else "" }}</span>
+                                    </div>
+                                    <div class="institution-actions">
+                                        <form method="POST" action="{{ url_for('revoke_token') }}" style="display: inline;">
+                                            <input type="hidden" name="token_id" value="{{ institution.token_id }}">
+                                            <button type="submit" class="btn-remove-small" onclick="return confirm('Are you sure you want to remove {{ institution.name }}?')" title="Remove this institution">
+                                                ❌
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+                
+                <div class="accounts-container">
+                    <div class="accounts-grid">
+                        {% for account in accounts_data.accounts %}
+                            <div class="account-card {{ account.account_classification|default('') }}">
+                                <div class="account-header">
+                                    <h4>{{ account.name }}</h4>
+                                    <div class="account-meta-header">
+                                        <span class="account-type">{{ account.type | title }} - {{ account.subtype | title }}</span>
+                                        <span class="institution-badge">{{ account.institution_name }}</span>
+                                    </div>
+                                </div>
+                                
+                                <div class="account-details">
+                                    <div class="balance-info">
+                                        <strong>Current Balance:</strong> {{ account.formatted_balance }}
+                                        {% if account.account_classification %}
+                                            <span class="classification-badge {{ account.account_classification }}">
+                                                {{ account.account_classification.title() }}
+                                            </span>
+                                        {% endif %}
+                                    </div>
+                                    
+                                    {% if account.balances.available %}
+                                        <div class="balance-info">
+                                            <strong>Available Balance:</strong> ${{ "%.2f" | format(account.balances.available) }}
+                                        </div>
+                                    {% endif %}
+                                    
+                                    <div class="account-meta">
+                                        <small><strong>Account ID:</strong> {{ account.account_id }}</small>
+                                        {% if account.updated_at %}
+                                            <small><strong>Updated:</strong> {{ account.updated_at[:19] }}</small>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                
+                {% if accounts_data.total_accounts > 1 %}
+                    <div class="accounts-summary">
+                        <h4>Account Summary</h4>
+                        <div class="summary-grid">
+                            {% set account_types = {} %}
+                            {% for account in accounts_data.accounts %}
+                                {% if account.type not in account_types %}
+                                    {% set _ = account_types.update({account.type: []}) %}
+                                {% endif %}
+                                {% set _ = account_types[account.type].append(account) %}
+                            {% endfor %}
+                            
+                            {% for account_type, accounts in account_types.items() %}
+                                <div class="summary-item">
+                                    <strong>{{ account_type | title }}:</strong> {{ accounts|length }} account{{ "s" if accounts|length != 1 else "" }}
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
+            {% else %}
+                <div class="alert alert-info">
+                    <strong>ℹ️ No account information available</strong>
+                </div>
+                <p>Account data may still be loading. Please try refreshing the page or add a new account.</p>
+            {% endif %}
+        </div>
+        
+        <hr>
+        
+        <div class="user-actions">
+            <form method="POST" action="{{ url_for('revoke_token') }}" style="display: inline;">
+                <button type="submit" class="btn-danger" onclick="return confirm('Are you sure you want to revoke ALL access tokens?')">
+                    Remove All Connections
+                </button>
+            </form>
+        </div>
+        
+    {% else %}
+        <div class="missing-token-info">
+            <h3>❌ No Bank Accounts Connected</h3>
+            <p><strong>You need to connect your bank account to view account information.</strong></p>
+            <p>Connect your bank account securely through Plaid to access your account details, balances, and transaction history.</p>
+        </div>
+        
+        <p><strong>Get started:</strong> Connect your bank account using our secure integration</p>
+        
+        <div class="token-options">
+            <h3>Connect Your Bank Account</h3>
+            <p>Use our secure Plaid integration to connect your bank account instantly:</p>
+            <a href="/create_token" class="btn-primary">Connect Bank Account</a>
+            <p><small>Your credentials are never stored and all connections are secured by Plaid.</small></p>
+        </div>
+        
+        <hr>
+    {% endif %}
+{% endif %}
+
+<!-- Quick Actions -->
+{% if has_token %}
+    <div class="quick-actions">
+        <h3>Quick Actions</h3>
+        <div class="action-buttons">
+            <a href="/transactions/page" class="btn-primary">📊 View Transaction History</a>
+            <a href="/add_account" class="btn-secondary">+ Add Another Account</a>
+        </div>
+    </div>
+{% endif %}
+
+{% endblock %} 

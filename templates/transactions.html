@@ -1,0 +1,358 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="user-info">
+    <h3>Transactions for {{ user.username }}</h3>
+    <div class="user-actions">
+        <a href="{{ url_for('main') }}" class="btn-secondary">← Back to Dashboard</a>
+    </div>
+</div>
+
+<h1>Transaction History</h1>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+            <div class="alert alert-{{ category }}">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
+{% endwith %}
+
+<!-- Transaction Controls -->
+<div class="transaction-controls">
+    <div class="filters-section">
+        <h3>Filters</h3>
+        <div class="filter-controls">
+            <div class="filter-group">
+                <label for="account-type-filter">Account Type:</label>
+                <select id="account-type-filter" class="filter-select">
+                    <option value="depository,credit">All (Checking & Credit)</option>
+                    <option value="depository">Checking Accounts Only</option>
+                    <option value="credit">Credit Cards Only</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label for="days-filter">Time Period:</label>
+                <select id="days-filter" class="filter-select">
+                    <option value="7">Last 7 Days</option>
+                    <option value="30" selected>Last 30 Days</option>
+                    <option value="90">Last 90 Days</option>
+                    <option value="180">Last 6 Months</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <button id="refresh-btn" class="btn-refresh">🔄 Refresh from Banks</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Transaction Summary -->
+<div id="transaction-summary" class="transaction-summary">
+    {% if transactions_data.summary %}
+        <h3>Summary</h3>
+        <div class="summary-cards">
+            <div class="summary-card income">
+                <div class="summary-header">
+                    <h5>💰 Income</h5>
+                    <span class="transaction-count">{{ transactions_data.summary.total_transactions }} transactions</span>
+                </div>
+                <div class="summary-amount positive">
+                    ${{ "{:,.2f}".format(transactions_data.summary.total_debits) }}
+                </div>
+            </div>
+            
+            <div class="summary-card expenses">
+                <div class="summary-header">
+                    <h5>💳 Expenses</h5>
+                    <span class="transaction-count">{{ transactions_data.summary.total_transactions }} transactions</span>
+                </div>
+                <div class="summary-amount negative">
+                    ${{ "{:,.2f}".format(transactions_data.summary.total_credits) }}
+                </div>
+            </div>
+            
+            <div class="summary-card net-flow">
+                <div class="summary-header">
+                    <h5>📈 Net Flow</h5>
+                    <span class="transaction-count">{{ transactions_data.summary.period_days }} days</span>
+                </div>
+                <div class="summary-amount {{ 'positive' if transactions_data.summary.net_flow >= 0 else 'negative' }}">
+                    ${{ "{:,.2f}".format(transactions_data.summary.net_flow) }}
+                </div>
+            </div>
+        </div>
+    {% endif %}
+</div>
+
+<!-- Top Categories -->
+<div id="top-categories" class="categories-section">
+    {% if transactions_data.summary and transactions_data.summary.top_categories %}
+        <h4>Top Spending Categories</h4>
+        <div class="categories-grid">
+            {% for category in transactions_data.summary.top_categories %}
+                <div class="category-card">
+                    <div class="category-name">{{ category.category }}</div>
+                    <div class="category-amount">${{ "{:,.2f}".format(category.total_amount) }}</div>
+                    <div class="category-count">{{ category.transaction_count }} transactions</div>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+</div>
+
+<!-- Transaction List -->
+<div id="transactions-container" class="transactions-container">
+    <div class="transactions-header">
+        <h3>Recent Transactions</h3>
+        <div class="cache-status">
+            {% if transactions_data.is_cached %}
+                <span class="status-cached">📋 Cached Data</span>
+            {% else %}
+                <span class="status-fresh">🔄 Fresh Data</span>
+            {% endif %}
+        </div>
+    </div>
+    
+    <div id="transactions-list" class="transactions-list">
+        {% if transactions_data.transactions %}
+            {% for transaction in transactions_data.transactions %}
+                <div class="transaction-item {{ transaction.transaction_type }}">
+                    <div class="transaction-main">
+                        <div class="transaction-info">
+                            <h4 class="transaction-name">{{ transaction.name }}</h4>
+                            {% if transaction.merchant_name %}
+                                <p class="merchant-name">{{ transaction.merchant_name }}</p>
+                            {% endif %}
+                            <div class="transaction-meta">
+                                <span class="account-name">{{ transaction.account_name }}</span>
+                                <span class="transaction-date">{{ transaction.date }}</span>
+                                {% if transaction.pending %}
+                                    <span class="pending-badge">Pending</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        
+                        <div class="transaction-amount">
+                            <span class="amount {{ transaction.transaction_type }}">
+                                {% if transaction.transaction_type == 'debit' %}+{% else %}-{% endif %}{{ transaction.formatted_amount }}
+                            </span>
+                            {% if transaction.category %}
+                                <span class="category-tag">{{ transaction.category }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="no-transactions">
+                <p>No transactions found for the selected criteria.</p>
+                <p>Try changing your filters or refreshing data from your banks.</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Loading Indicator -->
+<div id="loading-indicator" class="loading-indicator" style="display: none;">
+    <div class="spinner"></div>
+    <p>Loading transactions...</p>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const accountTypeFilter = document.getElementById('account-type-filter');
+    const daysFilter = document.getElementById('days-filter');
+    const refreshBtn = document.getElementById('refresh-btn');
+    const loadingIndicator = document.getElementById('loading-indicator');
+    const transactionsContainer = document.getElementById('transactions-container');
+    const transactionSummary = document.getElementById('transaction-summary');
+    const topCategories = document.getElementById('top-categories');
+    
+    function showLoading() {
+        loadingIndicator.style.display = 'block';
+        transactionsContainer.style.opacity = '0.5';
+    }
+    
+    function hideLoading() {
+        loadingIndicator.style.display = 'none';
+        transactionsContainer.style.opacity = '1';
+    }
+    
+    function updateTransactions(refresh = false) {
+        showLoading();
+        
+        const accountTypes = accountTypeFilter.value;
+        const days = daysFilter.value;
+        
+        let url = `/transactions?days=${days}`;
+        if (accountTypes !== 'depository,credit') {
+            url += `&account_types=${accountTypes}`;
+        }
+        if (refresh) {
+            url += '&refresh=true';
+        }
+        
+        fetch(url)
+            .then(response => response.json())
+            .then(data => {
+                hideLoading();
+                
+                if (data.error) {
+                    alert('Error loading transactions: ' + data.error);
+                    return;
+                }
+                
+                // Update summary
+                updateSummary(data.summary);
+                
+                // Update categories
+                updateCategories(data.summary.top_categories);
+                
+                // Update transactions list
+                updateTransactionsList(data.transactions, data.is_cached);
+                
+                // Update refresh button
+                refreshBtn.innerHTML = data.is_cached ? '🔄 Refresh from Banks' : '🔄 Refresh';
+            })
+            .catch(error => {
+                hideLoading();
+                alert('Error loading transactions: ' + error);
+            });
+    }
+    
+    function updateSummary(summary) {
+        const summaryHtml = `
+            <h3>Summary</h3>
+            <div class="summary-cards">
+                <div class="summary-card income">
+                    <div class="summary-header">
+                        <h5>💰 Income</h5>
+                        <span class="transaction-count">${summary.total_transactions} transactions</span>
+                    </div>
+                    <div class="summary-amount positive">
+                        $${summary.total_debits.toLocaleString('en-US', {minimumFractionDigits: 2})}
+                    </div>
+                </div>
+                
+                <div class="summary-card expenses">
+                    <div class="summary-header">
+                        <h5>💳 Expenses</h5>
+                        <span class="transaction-count">${summary.total_transactions} transactions</span>
+                    </div>
+                    <div class="summary-amount negative">
+                        $${summary.total_credits.toLocaleString('en-US', {minimumFractionDigits: 2})}
+                    </div>
+                </div>
+                
+                <div class="summary-card net-flow">
+                    <div class="summary-header">
+                        <h5>📈 Net Flow</h5>
+                        <span class="transaction-count">${summary.period_days} days</span>
+                    </div>
+                    <div class="summary-amount ${summary.net_flow >= 0 ? 'positive' : 'negative'}">
+                        $${summary.net_flow.toLocaleString('en-US', {minimumFractionDigits: 2})}
+                    </div>
+                </div>
+            </div>
+        `;
+        transactionSummary.innerHTML = summaryHtml;
+    }
+    
+    function updateCategories(categories) {
+        if (!categories || categories.length === 0) {
+            topCategories.innerHTML = '<p>No category data available.</p>';
+            return;
+        }
+        
+        const categoriesHtml = `
+            <h4>Top Spending Categories</h4>
+            <div class="categories-grid">
+                ${categories.map(cat => `
+                    <div class="category-card">
+                        <div class="category-name">${cat.category}</div>
+                        <div class="category-amount">$${cat.total_amount.toLocaleString('en-US', {minimumFractionDigits: 2})}</div>
+                        <div class="category-count">${cat.transaction_count} transactions</div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+        topCategories.innerHTML = categoriesHtml;
+    }
+    
+    function updateTransactionsList(transactions, isCached) {
+        const cacheStatus = isCached ? '📋 Cached Data' : '🔄 Fresh Data';
+        const statusClass = isCached ? 'status-cached' : 'status-fresh';
+        
+        let transactionsHtml = `
+            <div class="transactions-header">
+                <h3>Recent Transactions</h3>
+                <div class="cache-status">
+                    <span class="${statusClass}">${cacheStatus}</span>
+                </div>
+            </div>
+            <div class="transactions-list">
+        `;
+        
+        if (transactions && transactions.length > 0) {
+            transactions.forEach(transaction => {
+                const amountPrefix = transaction.transaction_type === 'debit' ? '+' : '-';
+                const pendingBadge = transaction.pending ? '<span class="pending-badge">Pending</span>' : '';
+                const categoryTag = transaction.category ? `<span class="category-tag">${transaction.category}</span>` : '';
+                const merchantName = transaction.merchant_name ? `<p class="merchant-name">${transaction.merchant_name}</p>` : '';
+                
+                transactionsHtml += `
+                    <div class="transaction-item ${transaction.transaction_type}">
+                        <div class="transaction-main">
+                            <div class="transaction-info">
+                                <h4 class="transaction-name">${transaction.name}</h4>
+                                ${merchantName}
+                                <div class="transaction-meta">
+                                    <span class="account-name">${transaction.account_name}</span>
+                                    <span class="transaction-date">${transaction.date}</span>
+                                    ${pendingBadge}
+                                </div>
+                            </div>
+                            
+                            <div class="transaction-amount">
+                                <span class="amount ${transaction.transaction_type}">
+                                    ${amountPrefix}${transaction.formatted_amount}
+                                </span>
+                                ${categoryTag}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+        } else {
+            transactionsHtml += `
+                <div class="no-transactions">
+                    <p>No transactions found for the selected criteria.</p>
+                    <p>Try changing your filters or refreshing data from your banks.</p>
+                </div>
+            `;
+        }
+        
+        transactionsHtml += '</div>';
+        transactionsContainer.innerHTML = transactionsHtml;
+    }
+    
+    // Event listeners
+    accountTypeFilter.addEventListener('change', function() {
+        updateTransactions(false);
+    });
+    
+    daysFilter.addEventListener('change', function() {
+        updateTransactions(false);
+    });
+    
+    refreshBtn.addEventListener('click', function() {
+        updateTransactions(true);
+    });
+});
+</script>
+{% endblock %} 
